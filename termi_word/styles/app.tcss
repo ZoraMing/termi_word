@@ -1,0 +1,39 @@
+Screen {
+    background: #0b0d10;
+    color: #d5d9e0;
+}
+
+.panel {
+    width: 72;
+    max-height: 12;
+    min-height: 6;
+    margin: 1 2;
+    padding: 0 1;
+    border: solid #4b5563;
+    background: #11151b;
+}
+
+CommandPalette {
+    background: #0b0d10;
+    color: #d5d9e0;
+}
+
+CommandInput {
+    border: solid #4b5563;
+    background: #11151b;
+    color: #f59e0b;
+}
+
+CommandList {
+    border: solid #374151;
+    background: #11151b;
+}
+
+.command-palette--highlight {
+    color: #f59e0b;
+    text-style: bold;
+}
+
+.command-palette--help-text {
+    color: #8a94a6;
+}

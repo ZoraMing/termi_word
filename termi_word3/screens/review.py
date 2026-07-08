@@ -24,6 +24,7 @@ class ReviewScreen(Screen):
         self.is_revealed = False
         self.feedback = ""
         self._waiting = False
+        self.content_scroll = 0
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
@@ -46,7 +47,7 @@ class ReviewScreen(Screen):
         return None
 
     def render_card(self) -> None:
-        """根据当前状态渲染 8 行核心内容和提示。"""
+        """根据当前状态渲染 8 行核心内容和提示，支持纵向滚动。"""
         card = self.current_card
         content_widget = self.query_one("#content-area", Static)
         msg_widget = self.query_one("#message-area", Static)
@@ -87,24 +88,45 @@ class ReviewScreen(Screen):
                 msg_widget.update("按 Space 键翻卡以查看完整释义")
             footer_widget.update(self.app.ui_config.footer("review"))
         else:
-            # 背面：单词头 + 详细释义
+            # 背面：生成全部内容行，支持纵向滚动
             us_str = f" /{word.us}/" if word.us else ""
-            header = f"  {word.w}{us_str}  [{word.c or '-'}]"
+            all_lines = [
+                f"  {word.w}{us_str}  [{word.c or '-'}]",
+            ]
+            if word.core:
+                all_lines.append(f"  Core: {word.core}")
+            if word.zh:
+                all_lines.append(f"  CN:   {word.zh}")
+            if word.en:
+                all_lines.append(f"  EN:   {word.en}")
+            if word.ex:
+                all_lines.append(f"  Ex:   {word.ex}")
+            if word.exz:
+                all_lines.append(f"        {word.exz}")
+
+            # 纵向滚动：截取可见窗口
+            max_visible = 6
+            total = len(all_lines)
+            if total > max_visible:
+                self.content_scroll = max(0, min(self.content_scroll, total - max_visible))
+                visible = all_lines[self.content_scroll : self.content_scroll + max_visible]
+                # 滚动指示器追加到最后一行末尾
+                indicator = ""
+                if self.content_scroll > 0:
+                    indicator += "↑"
+                if self.content_scroll + max_visible < total:
+                    indicator += "↓"
+                if indicator:
+                    last = visible[-1]
+                    visible[-1] = last + f" {indicator}"
+            else:
+                visible = all_lines
+
             lines = [
                 f"Termi Word / Revealed  {progress}{star_flag}",
                 rule(),
-                header,
             ]
-            if word.core:
-                lines.append(f"  Core: {word.core}")
-            if word.zh:
-                lines.append(f"  CN:   {word.zh}")
-            if word.en:
-                lines.append(f"  EN:   {word.en}")
-            if word.ex:
-                lines.append(f"  Ex:   {word.ex}")
-            if word.exz:
-                lines.append(f"        {word.exz}")
+            lines.extend(visible)
 
             content_widget.update(render_content_block(lines, height=8))
             if not self._waiting:
@@ -128,11 +150,26 @@ class ReviewScreen(Screen):
             return
 
         key = event.key
+
+        # 纵向滚动（翻卡背面且内容溢出时）
+        if key == "up" and self.is_revealed:
+            event.stop()
+            if self.content_scroll > 0:
+                self.content_scroll -= 1
+                self.render_card()
+            return
+        if key == "down" and self.is_revealed:
+            event.stop()
+            self.content_scroll += 1
+            self.render_card()
+            return
+
         # Space 翻卡
         if key == "space":
             event.stop()
             if not self.is_revealed:
                 self.is_revealed = True
+                self.content_scroll = 0
                 self.render_card()
             return
 
@@ -146,6 +183,7 @@ class ReviewScreen(Screen):
             feedback_str = self.app.study_service.rate_card(self.session_id, card.id, rating)
             self.query_one("#message-area", Static).update(f"已记录！{feedback_str}")
             self._waiting = True
+            self.content_scroll = 0
             self.render_card()
             self.run_worker(self._auto_advance())
             return
@@ -165,6 +203,7 @@ class ReviewScreen(Screen):
             self.app.study_service.suspend_word(self.session_id, card.word.id)
             self.query_one("#message-area", Static).update("已挂起此单词。后续将不再调度复习。")
             self._waiting = True
+            self.content_scroll = 0
             self.run_worker(self._auto_advance(immediate_ui_refresh=True))
             return
 
@@ -173,6 +212,7 @@ class ReviewScreen(Screen):
             event.stop()
             self.query_one("#message-area", Static).update("已跳过当前单词。")
             self._waiting = True
+            self.content_scroll = 0
             self.run_worker(self._auto_advance(immediate_ui_refresh=True))
             return
 
@@ -183,4 +223,5 @@ class ReviewScreen(Screen):
         self._waiting = False
         self.index += 1
         self.is_revealed = False
+        self.content_scroll = 0
         self.render_card()

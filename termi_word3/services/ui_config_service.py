@@ -10,7 +10,7 @@ DEFAULT_UI_CONFIG = {
         "today": "1-7 跳转   Ctrl+/ 搜索   Esc Esc 退出",
         "words": "上下 移动   Space/Enter 详情   Esc 返回",
         "calendar": "上下 选择   Enter/Space 编辑   Esc 返回",
-        "settings": "上下 选择   Enter/Space 确认   Esc 返回",
+        "settings": "上下 选择   Enter/Space 确认   可配搜索快捷键   Esc 返回",
         "review": "Space 翻卡   1-4 评分   f 收藏   t 挂起   Esc 返回",
         "spelling": "Enter 提交   Tab 提示   Space 答案   s 跳过   Esc 返回",
     }

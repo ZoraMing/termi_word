@@ -158,5 +158,6 @@ class Setting(Base):
     show_en = Column(Boolean, default=True)
     show_examples = Column(Boolean, default=True)
     theme = Column(String(30), default="dark")
+    search_shortcut = Column(String(30), default="ctrl+slash")
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

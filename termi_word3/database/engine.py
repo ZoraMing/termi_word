@@ -29,3 +29,14 @@ def init_database(session_factory: sessionmaker) -> None:
     """初始化数据库表。"""
     engine = session_factory.kw["bind"]
     Base.metadata.create_all(engine)
+
+    # 增量迁移：为 settings 表添加缺失的列
+    with engine.begin() as conn:
+        result = conn.exec_driver_sql("PRAGMA table_info(settings)")
+        existing = {row[1] for row in result}
+        migrations = {
+            "search_shortcut": "ALTER TABLE settings ADD COLUMN search_shortcut VARCHAR(30) DEFAULT 'ctrl+slash'",
+        }
+        for col, ddl in migrations.items():
+            if col not in existing:
+                conn.exec_driver_sql(ddl)

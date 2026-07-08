@@ -31,7 +31,8 @@ class WordsScreen(Screen):
         self.search_query = ""
         self.selected = 0
         self.list_offset = 0
-        self.detail_scroll = 0
+        self.detail_scroll_x = 0
+        self.detail_scroll_y = 0
         self.show_detail = False
         self.starred_only = False
         self.entries: list[WordEntry] = []
@@ -41,7 +42,7 @@ class WordsScreen(Screen):
         with Static(classes="frame-container"):
             yield Static(id="content-area")
             with Horizontal(classes="input-row"):
-                yield Static("搜索 > ", classes="input-prefix")
+                yield Static("> ", classes="input-prefix")
                 yield Input(id="words-search-input", placeholder="键入进行实时搜索...")
             yield Static(id="message-area")
             yield Static(id="footer-area")
@@ -96,14 +97,11 @@ class WordsScreen(Screen):
         self.list_offset = min(self.list_offset, self.selected)
 
     def render_words(self) -> None:
-        """渲染核心 7 行词表内容。"""
+        """渲染核心 7 行词表内容，详情支持纵向滚动。"""
         content_widget = self.query_one("#content-area", Static)
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
 
-        # 列表最大行数计算：总高 7 行。
-        # 如果详情展开，详情区占用 3 行，分割线 1 行，则列表展示区只剩 3 行。
-        # 如果未展开，列表展示区占 6 行，统计占 1 行。
         lines = []
         if self.show_detail and self.results:
             list_limit = 3
@@ -116,13 +114,11 @@ class WordsScreen(Screen):
             word = entry.word
             meaning = word.zh or word.core or word.en or ""
             star = "*" if word.is_starred else " "
-            # 对齐格式化行
             lines.append(f"{pointer}{word.w:<16} {entry.status:<4}{star} [{word.c or '-'}] {meaning}")
 
         if not visible:
             lines.append("  无匹配单词结果")
 
-        # 填充行高到 list_limit
         while len(lines) < list_limit:
             lines.append("")
 
@@ -130,8 +126,23 @@ class WordsScreen(Screen):
         if self.show_detail and self.results:
             lines.append(rule())
             detail_all = self._detail_lines(self.results[self.selected].word)
-            # 详情可见 3 行，可横向滚动
-            visible_detail = detail_all[self.detail_scroll : self.detail_scroll + 3]
+            max_detail = 3
+            total = len(detail_all)
+            if total > max_detail:
+                self.detail_scroll_y = max(0, min(self.detail_scroll_y, total - max_detail))
+                visible_detail = detail_all[self.detail_scroll_y : self.detail_scroll_y + max_detail]
+                # 纵向滚动指示器追加到最后一行末尾
+                indicator = ""
+                if self.detail_scroll_y > 0:
+                    indicator += "↑"
+                if self.detail_scroll_y + max_detail < total:
+                    indicator += "↓"
+                if indicator and visible_detail:
+                    visible_detail[-1] = visible_detail[-1] + f" {indicator}"
+            else:
+                visible_detail = detail_all
+            # 横向滚动：截取可见宽度
+            visible_detail = [line[self.detail_scroll_x:] for line in visible_detail]
             lines.extend(visible_detail)
         else:
             lines.append(
@@ -139,13 +150,13 @@ class WordsScreen(Screen):
             )
 
         content_widget.update(render_content_block(lines, height=7))
-        
+
         # 刷新状态消息区
         filter_status = "【仅显示收藏*】" if self.starred_only else ""
         self_focus = self.query_one("#words-search-input", Input).has_focus
         focus_status = "输入中 | " if self_focus else "列表聚焦 (按 Tab 聚焦输入) | "
         msg_widget.update(f"{focus_status}{filter_status}按 ctrl+f 切换收藏过滤")
-        
+
         footer_widget.update(self.app.ui_config.footer("words"))
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -174,7 +185,7 @@ class WordsScreen(Screen):
         if key == "escape":
             event.stop()
             if inp.has_focus:
-                inp.screen_blur()  # 失去焦点退出输入态
+                inp.blur()  # 失去焦点退出输入态
                 self.render_words()
             else:
                 self.app.pop_screen()
@@ -188,24 +199,33 @@ class WordsScreen(Screen):
             self.render_words()
             return
 
-        # 3. 向上滚动列表
+        # 3. 向上：列表选择 or 详情纵向滚动
         if key == "up":
             event.stop()
-            self._move_selection(-1)
+            if self.show_detail:
+                if self.detail_scroll_y > 0:
+                    self.detail_scroll_y -= 1
+                    self.render_words()
+            else:
+                self._move_selection(-1)
             return
 
-        # 4. 向下滚动列表
+        # 4. 向下：列表选择 or 详情纵向滚动
         if key == "down":
             event.stop()
-            self._move_selection(1)
+            if self.show_detail:
+                self.detail_scroll_y += 1
+                self.render_words()
+            else:
+                self._move_selection(1)
             return
 
-        # 5. 详情页翻页/左右滚动
+        # 5. 详情页左右横向滚动
         if key in ("left", "right"):
             if self.show_detail:
                 event.stop()
                 delta = -1 if key == "left" else 1
-                self.detail_scroll = max(0, self.detail_scroll + delta)
+                self.detail_scroll_x = max(0, self.detail_scroll_x + delta)
                 self.render_words()
             return
 
@@ -213,7 +233,8 @@ class WordsScreen(Screen):
         if key in ("enter", "space"):
             event.stop()
             self.show_detail = not self.show_detail
-            self.detail_scroll = 0
+            self.detail_scroll_x = 0
+            self.detail_scroll_y = 0
             self.render_words()
             return
 
@@ -263,13 +284,18 @@ class WordsScreen(Screen):
 
     @staticmethod
     def _detail_lines(word: Word) -> list[str]:
-        """返回 3 行展开的精炼详情段落。"""
+        """返回全部详情行，支持纵向滚动。"""
         lines = []
         star_lbl = " [已收藏]" if word.is_starred else ""
-        lines.append(f"  定义: {word.w}  /{word.us or '-'}/{star_lbl}")
-        lines.append(f"  释义: {word.zh or word.core or '-'}")
+        lines.append(f"  {word.w}  /{word.us or '-'}/{star_lbl}")
+        if word.core:
+            lines.append(f"  Core: {word.core}")
+        if word.zh:
+            lines.append(f"  CN:   {word.zh}")
+        if word.en:
+            lines.append(f"  EN:   {word.en}")
         if word.ex:
-            lines.append(f"  例句: {word.ex} ({word.exz or ''})")
-        else:
-            lines.append(f"  英文: {word.en or '-'}")
+            lines.append(f"  Ex:   {word.ex}")
+        if word.exz:
+            lines.append(f"        {word.exz}")
         return lines

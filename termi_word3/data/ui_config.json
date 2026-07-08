@@ -1,0 +1,13 @@
+{
+  "active_deck": "IELTSluan_2",
+  "daily_new_target": 40,
+  "review_soft_limit": 100,
+  "daily_spelling_target": 25,
+  "spelling_enabled": true,
+  "theme": "quiet_dark",
+  "search_shortcut": "ctrl+slash",
+  "panel_max_width": 120,
+  "panel_min_height": 6,
+  "panel_max_height": 12,
+  "max_panel_height": 14
+}

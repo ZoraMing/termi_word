@@ -23,13 +23,25 @@ class SettingsScreen(Screen):
         ("show_us", "显示音标", "bool"),
         ("show_en", "显示英文", "bool"),
         ("show_examples", "显示例句", "bool"),
+        ("search_shortcut", "搜索快捷键", "text"),
     ]
+
+    # 快捷键友好名称映射
+    FRIENDLY_SHORTCUTS = {
+        "ctrl+slash": "Ctrl+/",
+        "ctrl+p": "Ctrl+P",
+        "ctrl+s": "Ctrl+S",
+        "ctrl+f": "Ctrl+F",
+        "ctrl+k": "Ctrl+K",
+        "ctrl+q": "Ctrl+Q",
+    }
+    SHORTCUT_KEYS = {v: k for k, v in FRIENDLY_SHORTCUTS.items()}
 
     def __init__(self) -> None:
         super().__init__()
         self.selected = 0
         self.editing = False
-        self.values: dict[str, int | bool] = {}
+        self.values: dict[str, int | bool | str] = {}
         self.deck_name = "无活跃词本"
         self.last_msg = ""
 
@@ -37,7 +49,7 @@ class SettingsScreen(Screen):
         with Static(classes="frame-container"):
             yield Static(id="content-area")
             with Horizontal(classes="input-row"):
-                yield Static("设置值为 > ", classes="input-prefix")
+                yield Static("> ", classes="input-prefix")
                 yield Input(id="settings-input", placeholder="输入新的设置值...")
             yield Static(id="message-area")
             yield Static(id="footer-area")
@@ -61,6 +73,8 @@ class SettingsScreen(Screen):
                 val = getattr(setting, key)
                 if kind == "bool":
                     self.values[key] = bool(val)
+                elif kind == "text":
+                    self.values[key] = str(val or "")
                 else:
                     self.values[key] = max(0, int(val or 0))
 
@@ -70,22 +84,19 @@ class SettingsScreen(Screen):
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
 
-        # 自适应高度控制：
-        # 如果是编辑态，我们需要展示输入框，所以核心字符区高度限为 7 行（只展示 7 个设置字段）；
-        # 如果是非编辑态，输入框隐藏，高度为 8 行（包括 1 行 Settings 词本头部 + 7 个设置字段）。
         h = 7 if self.editing else 8
         lines = []
-
-        if not self.editing:
-            lines.append(f"Settings  [当前词本: {self.deck_name}]")
 
         for index, (key, label, kind) in enumerate(self.fields):
             is_sel = index == self.selected
             is_edit = self.editing and is_sel
-            
-            # 格式化 Boolean
+
             if kind == "bool":
                 val_str = "是" if self.values[key] else "否"
+            elif kind == "text":
+                val_str = self.FRIENDLY_SHORTCUTS.get(
+                    str(self.values[key]), str(self.values[key])
+                )
             else:
                 val_str = str(self.values[key])
 
@@ -133,7 +144,7 @@ class SettingsScreen(Screen):
             return
 
     def _activate_field(self) -> None:
-        """激活选中字段。Boolean 键直接切换；Int 键打开 Input 键盘。"""
+        """激活选中字段。Boolean 直接切换；Int/Text 打开 Input 编辑。"""
         key, label, kind = self.fields[self.selected]
         if kind == "bool":
             self.values[key] = not bool(self.values[key])
@@ -142,37 +153,51 @@ class SettingsScreen(Screen):
             self.render_settings()
             return
 
-        # int 类型打开底部输入框
+        # int/text 类型打开底部输入框
         self.editing = True
         inp_row = self.query_one(".input-row", Horizontal)
         inp = self.query_one("#settings-input", Input)
-        
-        # 激活前先刷新高度，把 content-area 调整为 7 行以给输入行腾出空间
+
         self.render_settings()
-        
+
         inp_row.display = True
         inp.display = True
-        inp.value = str(self.values[key])
+        if kind == "text":
+            friendly = self.FRIENDLY_SHORTCUTS.get(str(self.values[key]), str(self.values[key]))
+            inp.value = friendly
+            self.last_msg = f"正在修改【{label}】，可选: Ctrl+/ Ctrl+P Ctrl+S Ctrl+F Ctrl+K Ctrl+Q"
+        else:
+            inp.value = str(self.values[key])
+            self.last_msg = f"正在修改【{label}】数值"
         inp.cursor_position = len(inp.value)
         inp.focus()
-        
-        self.last_msg = f"正在修改【{label}】数值"
         self.render_settings()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """提交新的数值型设定。"""
+        """提交新的设定值。"""
         if event.input.id != "settings-input":
             return
-        
+
         key, label, kind = self.fields[self.selected]
+        raw = event.value.strip()
+
         try:
-            val = int(event.value.strip() or "0")
-            if val < 0:
-                raise ValueError("数值不能为负数")
-            
-            self.values[key] = val
-            self._save_values()
-            self.last_msg = f"修改成功！【{label}】设定为 {val}。"
+            if kind == "text":
+                # 支持友好名称（如 Ctrl+/）或原始键名（如 ctrl+slash）
+                val = self.SHORTCUT_KEYS.get(raw, raw.lower().replace(" ", ""))
+                if not val:
+                    raise ValueError("快捷键不能为空")
+                self.values[key] = val
+                friendly = self.FRIENDLY_SHORTCUTS.get(val, val)
+                self._save_values()
+                self.last_msg = f"修改成功！【{label}】设定为 {friendly}。"
+            else:
+                val = int(raw or "0")
+                if val < 0:
+                    raise ValueError("数值不能为负数")
+                self.values[key] = val
+                self._save_values()
+                self.last_msg = f"修改成功！【{label}】设定为 {val}。"
             self._close_editor()
         except (ValueError, StatementError) as err:
             self.last_msg = f"输入错误：{err}"
@@ -197,9 +222,13 @@ class SettingsScreen(Screen):
                     val = self.values[key]
                     if kind == "bool":
                         setattr(setting, key, bool(val))
+                    elif kind == "text":
+                        setattr(setting, key, str(val or ""))
                     else:
                         setattr(setting, key, max(0, int(val or 0)))
                 session.commit()
+            # 刷新主应用的搜索快捷键缓存
+            self.app.refresh_search_shortcut()
         except Exception as err:
             self.last_msg = f"配置保存失败：{err}"
             self.render_settings()

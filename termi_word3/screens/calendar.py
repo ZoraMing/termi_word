@@ -34,7 +34,7 @@ class CalendarScreen(Screen):
         with Static(classes="frame-container"):
             yield Static(id="content-area")
             with Horizontal(classes="input-row"):
-                yield Static("修改为 > ", classes="input-prefix")
+                yield Static("> ", classes="input-prefix")
                 yield Input(id="calendar-input", placeholder="输入新目标数字...")
             yield Static(id="message-area")
             yield Static(id="footer-area")
@@ -56,44 +56,60 @@ class CalendarScreen(Screen):
             }
 
     def render_calendar(self) -> None:
-        """渲染核心 7 行日历与目标配置行。"""
+        """渲染完整月历与目标配置行。"""
         content_widget = self.query_one("#content-area", Static)
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
 
         with self.app.session_factory() as session:
             repo = AppRepository(session)
-            deck = repo.active_deck()
             reviewed = repo.today_review_count()
             spelled = repo.today_spelling_count()
             streak = repo.streak_days()
+            active_dates = repo.activity_dates()
 
         today = date.today()
-        # 得到本月日历行 (取前两周展示)
         weeks = calendar.monthcalendar(today.year, today.month)
+
+        # 构建月历行：今天用 > 标记
         month_rows = []
-        for week in weeks[:2]:
-            row_str = " ".join(" ." if day == 0 else f"{day:2d}" for day in week)
-            month_rows.append(row_str)
+        for week in weeks:
+            cells = []
+            for day in week:
+                if day == 0:
+                    cells.append(" .")
+                elif day == today.day:
+                    cells.append(f">{day:1d}")
+                else:
+                    cells.append(f"{day:2d}")
+            month_rows.append(" ".join(cells))
 
-        lines = [
-            f"Calendar & Goals  {today.year}-{today.month:02d}",
-            f"  Mon Tue Wed Thu Fri Sat Sun   {month_rows[0]} | {month_rows[1] if len(month_rows)>1 else ''}",
-            f"  实际进度：复习 {reviewed:<3} 拼写 {spelled:<3}  连续打卡 {streak:<2} 天",
-            rule(),
-        ]
-
-        # 渲染 3 个可编辑的目标字段
-        for index, (key, label) in enumerate(self.fields):
-            is_sel = index == self.selected
-            is_edit = self.editing and is_sel
-            val = self.values[key]
+        if self.editing:
+            # 编辑模式 (height=7): 标题 + 日历(最多5行) + 字段行(2行)
+            # 隐藏 weekday 行以腾出空间给字段选择
+            lines = [f"Calendar  {today.year}-{today.month:02d}"]
+            lines.extend(month_rows[:5])
+            for index, (key, label) in enumerate(self.fields):
+                is_sel = index == self.selected
+                is_edit = is_sel
+                val = self.values[key]
+                lines.append(
+                    field_row(label, val, selected=is_sel, editing=is_edit, width=14)
+                )
+            content_widget.update(render_content_block(lines, height=7))
+        else:
+            # 正常模式 (height=8): 标题 + weekday + 日历(最多5行) + 统计
+            lines = [
+                f"Calendar  {today.year}-{today.month:02d}",
+                "  Mo Tu We Th Fr Sa Su",
+            ]
+            lines.extend(month_rows[:5])
             lines.append(
-                field_row(label, val, selected=is_sel, editing=is_edit, width=14)
+                f"  复习 {reviewed}  拼写 {spelled}  连续 {streak} 天"
             )
+            content_widget.update(render_content_block(lines, height=8))
 
-        content_widget.update(render_content_block(lines, height=7))
-        msg_widget.update(self.last_msg or "按 ↑↓ 选择字段，按 Enter 键修改目标值")
+        msg_widget.update(self.last_msg or "按 ↑↓ 选择字段，Enter 键修改")
         footer_widget.update(self.app.ui_config.footer("calendar"))
 
     def on_key(self, event: Key) -> None:

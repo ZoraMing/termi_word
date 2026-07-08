@@ -46,6 +46,13 @@ Screen {
     background: transparent;
 }
 
+/* 输入行前缀标记 '>'：橙色高亮以区分普通文本 */
+.input-prefix {
+    color: #F59E0B;
+    width: auto;
+    min-width: 1;
+}
+
 /* 重度定制的原生 Input 组件：剥离全部背景、外框、Padding 和 Margin，实现命令行极简风格 */
 Input {
     width: 1fr;
@@ -54,7 +61,7 @@ Input {
     border: none;
     padding: 0 0;
     margin: 0 0;
-    color: #00D4AA; /* 高亮色为青色 */
+    color: #F59E0B; /* 橙色高亮，区分输入态 */
 }
 
 Input:focus {

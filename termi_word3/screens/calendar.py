@@ -11,15 +11,18 @@ from textual.screen import Screen
 from textual.widgets import Input, Static
 
 from termi_word3.database.repositories import AppRepository
-from termi_word3.ui import rule, render_content_block, field_row
+from termi_word3.ui import field_row, footer_height, render_content_block, render_footer, rule
+from termi_word3.ui.layout import compute_frame_layout
 
 
 class CalendarScreen(Screen):
     """日历与计划统计配置页。"""
 
+    can_focus = True
+
     fields = [
-        ("daily_new_target", "每日新词"),
-        ("review_soft_limit", "复习上限"),
+        ("daily_new_target", "每轮新词"),
+        ("review_soft_limit", "每轮复习"),
         ("daily_spelling_target", "每日拼写"),
     ]
 
@@ -29,6 +32,7 @@ class CalendarScreen(Screen):
         self.editing = False
         self.values: dict[str, int] = {}
         self.last_msg = ""
+        self.last_msg_severity = "info"
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
@@ -55,8 +59,44 @@ class CalendarScreen(Screen):
                 "daily_spelling_target": max(0, int(setting.daily_spelling_target or 0)),
             }
 
+    def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
+        with self.app.session_factory() as session:
+            setting = AppRepository(session).get_settings()
+        
+        layout = compute_frame_layout(
+            terminal_width=self.size.width,
+            terminal_height=self.size.height,
+            panel_min_height=setting.panel_min_height,
+            panel_max_height=setting.panel_max_height,
+            panel_max_width=setting.panel_max_width,
+            footer_text=footer_text,
+            has_input=self.editing,
+            message_rows=1,
+        )
+        
+        container = self.query_one(".frame-container", Static)
+        container.styles.height = layout.frame_height
+        container.styles.min_height = layout.frame_height
+        container.styles.max_height = layout.frame_height
+        container.styles.width = layout.frame_width
+        
+        self.query_one("#footer-area", Static).styles.height = layout.footer_rows
+
+        content = self.query_one("#content-area", Static)
+        content.styles.height = layout.content_height
+        content.styles.min_height = layout.content_height
+        content.styles.max_height = layout.content_height
+        
+        return layout.content_height, layout.content_width
+
+    def on_resize(self) -> None:
+        """窗口缩放事件，重新刷新渲染页面。"""
+        self.render_calendar()
+
     def render_calendar(self) -> None:
         """渲染完整月历与目标配置行。"""
+        footer_text = self.app.ui_config.footer("calendar")
+        content_height, width = self.apply_dynamic_layout(footer_text)
         content_widget = self.query_one("#content-area", Static)
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
@@ -67,28 +107,35 @@ class CalendarScreen(Screen):
             spelled = repo.today_spelling_count()
             streak = repo.streak_days()
             active_dates = repo.activity_dates()
+            setting = repo.get_settings()
 
         today = date.today()
         weeks = calendar.monthcalendar(today.year, today.month)
 
-        # 构建月历行：今天用 > 标记
         month_rows = []
         for week in weeks:
             cells = []
             for day in week:
                 if day == 0:
                     cells.append(" .")
-                elif day == today.day:
-                    cells.append(f">{day:1d}")
                 else:
-                    cells.append(f"{day:2d}")
+                    cur_date = date(today.year, today.month, day)
+                    day_str = f"{day:2d}"
+                    if day == today.day:
+                        day_str = f">{day:1d}"
+                    
+                    if cur_date in active_dates:
+                        # 绿色高亮完成目标打卡的日期
+                        cells.append(f"[bold #4ADE80]{day_str}[/]")
+                    else:
+                        cells.append(day_str)
             month_rows.append(" ".join(cells))
 
         if self.editing:
-            # 编辑模式 (height=7): 标题 + 日历(最多5行) + 字段行(2行)
-            # 隐藏 weekday 行以腾出空间给字段选择
-            lines = [f"Calendar  {today.year}-{today.month:02d}"]
-            lines.extend(month_rows[:5])
+            # 编辑模式: 标题 + 裁剪后的日历 + 字段配置行
+            lines = [f"Calendar / Editing  {today.year}-{today.month:02d}"]
+            calendar_limit = max(1, content_height - len(self.fields) - 1)
+            lines.extend(month_rows[:calendar_limit])
             for index, (key, label) in enumerate(self.fields):
                 is_sel = index == self.selected
                 is_edit = is_sel
@@ -96,24 +143,40 @@ class CalendarScreen(Screen):
                 lines.append(
                     field_row(label, val, selected=is_sel, editing=is_edit, width=14)
                 )
-            content_widget.update(render_content_block(lines, height=7))
+            content_widget.update(render_content_block(lines, height=content_height, width=width))
         else:
-            # 正常模式 (height=8): 标题 + weekday + 日历(最多5行) + 统计
+            # 正常模式: 标题 + weekday + 裁剪后的日历 + 统计与目标值展示
             lines = [
-                f"Calendar  {today.year}-{today.month:02d}",
+                f"Calendar / Browse  {today.year}-{today.month:02d}",
                 "  Mo Tu We Th Fr Sa Su",
             ]
-            lines.extend(month_rows[:5])
+            calendar_limit = max(1, content_height - 4)
+            lines.extend(month_rows[:calendar_limit])
             lines.append(
-                f"  复习 {reviewed}  拼写 {spelled}  连续 {streak} 天"
+                f"  今日打卡: 复习 {reviewed}  拼写 {spelled}  连续 {streak} 天"
             )
-            content_widget.update(render_content_block(lines, height=8))
+            lines.append(
+                f"  当前目标: 新词 {setting.daily_new_target}  复习 {setting.review_soft_limit}  拼写 {setting.daily_spelling_target}"
+            )
+            content_widget.update(render_content_block(lines, height=content_height, width=width))
+
+        msg_widget.remove_class("success", "error", "muted")
+        if self.last_msg_severity != "info":
+            msg_widget.add_class(self.last_msg_severity)
+        else:
+            msg_widget.add_class("muted")
 
         msg_widget.update(self.last_msg or "按 ↑↓ 选择字段，Enter 键修改")
-        footer_widget.update(self.app.ui_config.footer("calendar"))
+        footer_widget.update(render_footer(footer_text, width))
 
     def on_key(self, event: Key) -> None:
         """全局键盘逻辑拦截。"""
+        # 无条件放行全局搜索快捷键，避免被页面内 Key 消费吞掉
+        if self.app.is_search_shortcut(event.key):
+            event.stop()
+            self.app.open_search()
+            return
+
         key = event.key
         inp = self.query_one("#calendar-input", Input)
 
@@ -122,6 +185,14 @@ class CalendarScreen(Screen):
             if key == "escape":
                 event.stop()
                 self._close_editor()
+            return
+
+        # ? 键显示帮助
+        if key in ("question_mark", "?"):
+            event.stop()
+            self.last_msg = "快捷键: ↑↓ 选择目标 | Enter/Space 修改数值 | Esc 返回"
+            self.last_msg_severity = "info"
+            self.render_calendar()
             return
 
         if key == "escape":
@@ -163,6 +234,7 @@ class CalendarScreen(Screen):
         inp.focus()
         
         self.last_msg = f"正在修改【{label}】数值"
+        self.last_msg_severity = "info"
         self.render_calendar()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -180,9 +252,11 @@ class CalendarScreen(Screen):
             self.values[key] = val
             self._save_values()
             self.last_msg = f"已保存修改！【{label}】新目标为 {val}。"
+            self.last_msg_severity = "success"
             self._close_editor()
         except (ValueError, StatementError) as err:
             self.last_msg = f"输入错误：{err}"
+            self.last_msg_severity = "error"
             self.render_calendar()
 
     def _close_editor(self) -> None:

@@ -5,16 +5,19 @@ import asyncio
 from time import monotonic
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.events import Key
 from textual.widgets import Static
 
 from termi_word3.config import APP_TITLE, DEFAULT_DB_PATH
 from termi_word3.database.engine import create_session_factory, init_database
 from termi_word3.screens.calendar import CalendarScreen
+
 from termi_word3.screens.review import ReviewScreen
 from termi_word3.screens.settings import SettingsScreen
 from termi_word3.screens.spelling import SpellingScreen
 from termi_word3.screens.today import TodayScreen
+from termi_word3.screens.word_detail import WordDetailScreen
 from termi_word3.screens.words import WordsScreen
 from termi_word3.services.import_service import ImportService
 from termi_word3.services.spelling_service import SpellingService
@@ -27,6 +30,14 @@ class TermiWordApp(App):
 
     TITLE = APP_TITLE
     CSS_PATH = "styles/app.tcss"
+
+    # 全局绑定：priority=True 使该绑定优先于子 Widget（含 Input 的焦点处理）
+    # 这样即使 Input 有焦点，Ctrl+/ 也能被 App 捕获并触发 action_open_search
+    BINDINGS = [
+        Binding("ctrl+slash", "open_search", "全局搜索", priority=True, show=False),
+        Binding("ctrl+underscore", "open_search", "全局搜索", priority=True, show=False),
+        Binding("ctrl+_", "open_search", "全局搜索", priority=True, show=False),
+    ]
 
     def __init__(self) -> None:
         super().__init__()
@@ -72,11 +83,33 @@ class TermiWordApp(App):
     async def _start_study(self, mode: str) -> None:
         queue = await asyncio.to_thread(self.study_service.build_today_queue, mode)
         # 跳转至学习背词页，将卡片队列及会话 ID 传入
-        self.push_screen(ReviewScreen(queue.cards, queue.session_id))
+        self.push_screen(ReviewScreen(queue.cards, queue.session_id, is_extra=queue.is_extra))
 
-    def open_search(self) -> None:
-        """全局直达词表搜索并直接聚焦输入框。"""
-        self.push_screen(WordsScreen(focus_search=True))
+    def action_open_search(self, deck_id: int | None = None) -> None:
+        """全局搜索动作（由 BINDINGS 触发，priority=True 绕过 Input 焦点拦截）。
+        若当前栈顶已是词表页，则清空并重新聚焦搜索框，而非重复 push。
+        """
+        # 如果词表页已在栈顶，直接复用（清空搜索 + 聚焦输入框）
+        if self.screen.__class__.__name__ == "WordsScreen":
+            try:
+                from textual.widgets import Input
+                inp = self.screen.query_one("#words-search-input", Input)
+                inp.value = ""
+                inp.focus()
+                self.screen.call_later(self.screen.render_words)
+            except Exception:
+                pass
+            return
+        self.push_screen(WordsScreen(focus_search=True, deck_id=deck_id))
+
+
+    def open_search(self, deck_id: int | None = None) -> None:
+        """全局直达词表搜索并直接聚焦输入框（向后兼容调用方式）。"""
+        self.action_open_search(deck_id)
+
+    def open_word_detail(self, word_id: int) -> None:
+        """打开单词详情页"""
+        self.push_screen(WordDetailScreen(word_id))
 
     def go_back(self) -> None:
         """pop 返回上一屏，如果已是首页则不操作。"""
@@ -90,24 +123,36 @@ class TermiWordApp(App):
             setting = AppRepository(session).get_settings()
             self._search_shortcut = getattr(setting, "search_shortcut", None) or "ctrl+slash"
 
+    def is_search_shortcut(self, key: str) -> bool:
+        """统一判断全局搜索快捷键，兼容历史默认键值。"""
+        return key in {
+            self._search_shortcut,
+            "ctrl+slash",
+            "ctrl+/",
+            "ctrl+_",
+            "ctrl+underscore",
+            "ctrl+shift+slash",
+            "ctrl+shift+underscore",
+        }
+
     def on_key(self, event: Key) -> None:
         """全局键盘事件拦截分发。
         - ctrl+c / ctrl+z: 直接退出程序。
-        - 搜索快捷键（默认 ctrl+/）: 进入词表并聚焦搜索。
+        - 搜索快捷键（兼容后备，BINDINGS 处理不到的键名变体）。
         - escape:
           - 双击 (0.8s内) 退出程序；
           - 若非首页，pop 返回上一屏。
         """
         key = event.key
-        if key in ("ctrl+c", "ctrl+z"):
+        if key in ("ctrl+z",):
             event.stop()
             self.exit()
             return
 
-        # 搜索快捷键：支持配置值 + 兼容 ctrl+slash 和 ctrl+/
-        if key in (self._search_shortcut, "ctrl+slash", "ctrl+/"):
+        # 后备层：BINDINGS 未映射到的其他键名变体（不同终端编码差异）
+        if self.is_search_shortcut(key):
             event.stop()
-            self.open_search()
+            self.action_open_search()
             return
 
         if key == "escape":
@@ -120,4 +165,5 @@ class TermiWordApp(App):
             self._last_escape_at = now
 
             if self.screen.__class__.__name__ != "TodayScreen":
-                pass
+                event.stop()
+                self.go_back()

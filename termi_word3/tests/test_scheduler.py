@@ -19,7 +19,7 @@ class TestSchedulerTimezone(unittest.TestCase):
         card = Card(
             id=999,
             state=0,
-            due=datetime.datetime.utcnow(),
+            due=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             last_review=None,
             reps=0,
             lapses=0,
@@ -34,8 +34,8 @@ class TestSchedulerTimezone(unittest.TestCase):
         card = Card(
             id=999,
             state=1,
-            due=datetime.datetime.utcnow(),
-            last_review=datetime.datetime.utcnow() - datetime.timedelta(days=1),
+            due=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
+            last_review=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(days=1),
             reps=1,
             lapses=0,
             stability=1.2,
@@ -50,7 +50,7 @@ class TestSchedulerTimezone(unittest.TestCase):
         card = Card(
             id=777,
             state=0,
-            due=datetime.datetime.utcnow(),
+            due=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             last_review=None,
             reps=0,
             lapses=0,

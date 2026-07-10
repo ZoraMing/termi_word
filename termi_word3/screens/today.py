@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
+from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Static
 
 from termi_word3.database.repositories import AppRepository
-from termi_word3.ui import rule, render_content_block
+from termi_word3.ui import footer_height, render_content_block, render_footer, rule
+from termi_word3.ui.layout import compute_frame_layout
 
 
 class TodayScreen(Screen):
@@ -15,9 +17,8 @@ class TodayScreen(Screen):
     BINDINGS = [
         ("1", "study", "继续学习"),
         ("2", "review_only", "仅复习"),
-        ("3", "new_only", "仅新词"),
         ("4", "spelling", "拼写练习"),
-        ("5", "words", "词词表"),
+        ("5", "words", "词表"),
         ("6", "calendar", "打卡日历"),
         ("7", "settings", "设置参数"),
     ]
@@ -34,8 +35,60 @@ class TodayScreen(Screen):
     def on_screen_resume(self) -> None:
         self.refresh_summary()
 
+    def on_key(self, event: Key) -> None:
+        """全局键盘逻辑拦截。"""
+        if self.app.is_search_shortcut(event.key):
+            event.stop()
+            self.app.open_search()
+            return
+
+        if event.key in ("question_mark", "?"):
+            event.stop()
+            msg_widget = self.query_one("#message-area", Static)
+            msg_widget.remove_class("success", "error")
+            msg_widget.add_class("muted")
+            msg_widget.update("快捷键: 1-学习 | 2-仅复习 | 4-拼写 | 5-词表 | 6-打卡日历 | 7-设置 | Esc 退出")
+            return
+
+    def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
+        with self.app.session_factory() as session:
+            setting = AppRepository(session).get_settings()
+        
+        layout = compute_frame_layout(
+            terminal_width=self.size.width,
+            terminal_height=self.size.height,
+            panel_min_height=setting.panel_min_height,
+            panel_max_height=setting.panel_max_height,
+            panel_max_width=setting.panel_max_width,
+            footer_text=footer_text,
+            has_input=False,
+            message_rows=1,
+        )
+        
+        container = self.query_one(".frame-container", Static)
+        container.styles.height = layout.frame_height
+        container.styles.min_height = layout.frame_height
+        container.styles.max_height = layout.frame_height
+        container.styles.width = layout.frame_width
+        
+        self.query_one("#footer-area", Static).styles.height = layout.footer_rows
+
+        content = self.query_one("#content-area", Static)
+        content.styles.height = layout.content_height
+        content.styles.min_height = layout.content_height
+        content.styles.max_height = layout.content_height
+        
+        return layout.content_height, layout.content_width
+
+    def on_resize(self) -> None:
+        """窗口缩放事件，重新刷新渲染页面。"""
+        self.refresh_summary()
+
     def refresh_summary(self) -> None:
-        """从 SQLite 加载数据，重新刷新 8 行核心内容区。"""
+        """从 SQLite 加载数据，重新刷新核心内容区。"""
+        footer_text = self.app.ui_config.footer("today")
+        content_height, width = self.apply_dynamic_layout(footer_text)
+
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             deck = repo.active_deck()
@@ -53,25 +106,32 @@ class TodayScreen(Screen):
             # 剩余新词数
             remaining = repo.remaining_new_count(deck.id) if deck else 0
 
-        # 精确格式化 8 行核心静态字符画 (宽 68 字符)
+        # 精确格式化核心静态字符画，自适应宽度
+        title_fill = " " * max(1, width - len("Termi Word") - len("v1.0") - 2)
         lines = [
-            f"Termi Word                                            v1.0",
-            rule(),
+            f"Termi Word{title_fill}v1.0",
+            rule(width=width),
             f"当前词本：{deck_name:<10}  总词数：{total:<6}",
-            f"今日计划：新词 {setting.daily_new_target:<3} 复习 {setting.review_soft_limit:<3} 拼写 {setting.daily_spelling_target:<3}",
+            f"每轮配置：新词 {setting.daily_new_target:<3} 复习 {setting.review_soft_limit:<3}   今日计划：拼写 {setting.daily_spelling_target:<3}",
             f"当前完成：新词 {new_done:<2}  复习 {rev_done:<3}  拼写 {spelled:<3}  连续打卡 {streak:<2} 天",
             f"坚持计划：剩余新词数 {remaining:<5}",
-            rule(),
-            f"[1]继续学习  [2]复习  [3]新词  [4]拼写  [5]词表  [6]日历  [7]设置",
+            rule(width=width),
+            f"[1]学习  [2]复习  [4]拼写  [5]词表  [6]日历  [7]设置",
         ]
 
         self.query_one("#content-area", Static).update(
-            render_content_block(lines, height=8)
+            render_content_block(lines, height=content_height, width=width)
         )
-        self.query_one("#message-area", Static).update("")
-        self.query_one("#footer-area", Static).update(
-            self.app.ui_config.footer("today")
-        )
+        
+        msg_widget = self.query_one("#message-area", Static)
+        msg_widget.remove_class("success", "error", "muted")
+        if total == 0:
+            msg_widget.add_class("error")
+            msg_widget.update("⚠️ 词本词数为 0！请在 [7]设置 中执行同步词包。")
+        else:
+            msg_widget.update("")
+            
+        self.query_one("#footer-area", Static).update(render_footer(footer_text, width))
 
     # 快捷键动作分发
     def action_study(self) -> None:
@@ -79,9 +139,6 @@ class TodayScreen(Screen):
 
     def action_review_only(self) -> None:
         self.app.start_study("review")
-
-    def action_new_only(self) -> None:
-        self.app.start_study("new")
 
     def action_spelling(self) -> None:
         self.app.push_screen("spelling")

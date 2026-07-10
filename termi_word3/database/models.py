@@ -1,7 +1,7 @@
 """SQLAlchemy 数据模型定义"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean,
     Column,
@@ -21,7 +21,7 @@ Base = declarative_base()
 
 def utc_now() -> datetime:
     """返回当前的 UTC 时间。"""
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Deck(Base):
@@ -159,5 +159,9 @@ class Setting(Base):
     show_examples = Column(Boolean, default=True)
     theme = Column(String(30), default="dark")
     search_shortcut = Column(String(30), default="ctrl+slash")
+    panel_max_width = Column(Integer, default=120)
+    panel_min_height = Column(Integer, default=6)
+    panel_max_height = Column(Integer, default=16)
+    csv_column_mapping = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

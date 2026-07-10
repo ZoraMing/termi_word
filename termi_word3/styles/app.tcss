@@ -1,4 +1,14 @@
-/* Termi Word 3 深色主题 TCSS 样式 */
+/* Termi Word 3 深色主题 TCSS 样式 
+   主题颜色令牌映射注释：
+   - 前景色 text: #d5d9e0
+   - 次要文本 muted: #9CA3AF
+   - 边框 border: #6B7280
+   - 强调色 accent: #F59E0B
+   - 成功 success: #4ADE80
+   - 错误 error: #F87171
+   - 焦点底色 focus-bg: #1f2937
+   - 焦点前景色 focus-fg: #FBBF24
+*/
 
 Screen {
     background: transparent;
@@ -25,11 +35,26 @@ Screen {
     color: #d5d9e0;
 }
 
-/* 提示栏消息提示区，高亮使用橙色 */
+/* 提示栏消息提示区，默认橙色（状态/操作提示） */
 #message-area {
     height: 1;
     background: transparent;
     color: #F59E0B;
+}
+
+/* 成功操作反馈：高亮绿色 */
+#message-area.success {
+    color: #4ADE80;
+}
+
+/* 错误/异常反馈：低饱和红 */
+#message-area.error {
+    color: #F87171;
+}
+
+/* 次要信息/常规状态：灰色 */
+#message-area.muted {
+    color: #9CA3AF;
 }
 
 /* 底部操作快捷键 Footer 区域，颜色采用灰色以作区隔 */
@@ -66,5 +91,6 @@ Input {
 
 Input:focus {
     border: none;
-    background: transparent;
+    background: #1f2937;
+    color: #FBBF24;
 }

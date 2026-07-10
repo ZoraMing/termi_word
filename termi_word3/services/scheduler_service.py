@@ -1,22 +1,28 @@
 """基于 FSRS 的卡片状态调度服务"""
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Callable
+from datetime import datetime, timezone
 from fsrs import Card as FsrsCard
 from fsrs import Rating, Scheduler, State
 
 from termi_word3.database.models import Card, ReviewLog
 
 
+def default_utc_now() -> datetime:
+    """获取带 UTC 时区的当前时间"""
+    return datetime.now(timezone.utc)
+
+
 class SchedulerService:
     """包装 py-fsrs 对卡片进行间隔调度的计算逻辑。"""
 
-    def __init__(self) -> None:
+    def __init__(self, now: Callable[[], datetime] = default_utc_now) -> None:
         self.scheduler = Scheduler(enable_fuzzing=False)
+        self.now = now
 
     def review(self, card: Card, rating_value: int) -> ReviewLog:
         """根据用户评分更新 FSRS 卡片记忆属性，并返回关联的历史日志。"""
-        from datetime import timezone
         rating = Rating(rating_value)
         before_state = card.state
         before_due = card.due
@@ -24,36 +30,10 @@ class SchedulerService:
         before_last_review = card.last_review
 
         fsrs_card = self._to_fsrs_card(card)
+        current_time = self.now()
         
-        # 详尽的本地时区诊断日志
-        try:
-            import os
-            os.makedirs("data", exist_ok=True)
-            with open("data/debug_timezone.log", "a", encoding="utf-8") as f:
-                now_val = datetime.now(timezone.utc)
-                f.write(f"--- FSRS review_card Debug ---\n")
-                f.write(f"Card ID: {card.id}\n")
-                f.write(f"card.due: {card.due} (tzinfo={card.due.tzinfo if card.due else 'None'})\n")
-                f.write(f"card.last_review: {card.last_review} (tzinfo={card.last_review.tzinfo if card.last_review else 'None'})\n")
-                f.write(f"fsrs_card.due: {fsrs_card.due} (tzinfo={fsrs_card.due.tzinfo if fsrs_card.due else 'None'})\n")
-                f.write(f"fsrs_card.last_review: {fsrs_card.last_review} (tzinfo={fsrs_card.last_review.tzinfo if fsrs_card.last_review else 'None'})\n")
-                f.write(f"now: {now_val} (tzinfo={now_val.tzinfo})\n\n")
-        except Exception:
-            pass
-
-        try:
-            # 显式传入带时区的当前时间，防止 scheduler.review_card 内部因默认时区造成 offset 错误
-            reviewed_card, _fsrs_log = self.scheduler.review_card(fsrs_card, rating, datetime.now(timezone.utc))
-        except Exception as e:
-            try:
-                import traceback
-                with open("data/debug_timezone.log", "a", encoding="utf-8") as f:
-                    f.write(f"!!! TypeError Exception Triggered !!!\n")
-                    f.write(traceback.format_exc())
-                    f.write(f"\n")
-            except Exception:
-                pass
-            raise e
+        # 显式传入带时区的当前时间，防止 scheduler.review_card 内部因默认时区造成 offset 错误
+        reviewed_card, _fsrs_log = self.scheduler.review_card(fsrs_card, rating, current_time)
 
         self._apply_fsrs_card(card, reviewed_card, before_last_review)
 
@@ -70,12 +50,11 @@ class SchedulerService:
             difficulty=card.difficulty,
             elapsed_days=card.elapsed_days,
             scheduled_days=card.scheduled_days,
-            review_time=datetime.utcnow(),
+            review_time=current_time.astimezone(timezone.utc).replace(tzinfo=None),
         )
 
     def _to_fsrs_card(self, card: Card) -> FsrsCard:
         """将 SQLAlchemy 的 Card 模型转换成 FSRS 内部支持的卡片对象。"""
-        from datetime import timezone
         # State 枚举只支持 1, 2, 3, 4，不支持 0 (0为数据库未背的初始默认值，映射为 1 即 State.New)
         state = card.state if card.state in (1, 2, 3, 4) else 1
         stability = None if card.reps == 0 and not card.stability else card.stability
@@ -99,7 +78,6 @@ class SchedulerService:
         """辅助函数：安全地将任何 naive 或 aware datetime 统一转换为 UTC aware datetime。"""
         if dt is None:
             return None
-        from datetime import timezone
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
@@ -120,12 +98,13 @@ class SchedulerService:
         )
         
         # 提取 date 防止类型混淆相减
+        current_time = self.now()
         if before_last_review:
             b_date = before_last_review.date() if hasattr(before_last_review, "date") else before_last_review
-            target.elapsed_days = max(0, (datetime.utcnow().date() - b_date).days)
+            target.elapsed_days = max(0, (current_time.date() - b_date).days)
         else:
             target.elapsed_days = 0
             
         # target.due 剥离时区后与 naive utcnown.date 运算
         target_due_date = target.due.date() if hasattr(target.due, "date") else target.due
-        target.scheduled_days = max(0, (target_due_date - datetime.utcnow().date()).days)
+        target.scheduled_days = max(0, (target_due_date - current_time.date()).days)

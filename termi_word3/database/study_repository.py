@@ -1,7 +1,7 @@
 """学习/复习与卡片调度数据存取仓储。"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Iterable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
@@ -63,13 +63,24 @@ class StudyRepository:
         by_id = {card.id: card for card in cards}
         return [by_id[cid] for cid in ids if cid in by_id]
 
-    def open_session(self, deck_id: int) -> StudySession | None:
+    def open_session(self, deck_id: int, session_date: date | None = None) -> StudySession | None:
         """获取该词本当前活跃（进行中）的学习会话。"""
+        filters = [StudySession.deck_id == deck_id, StudySession.status == 0]
+        if session_date is not None:
+            filters.append(StudySession.session_date == session_date)
         return self.session.execute(
             select(StudySession)
-            .where(StudySession.deck_id == deck_id, StudySession.status == 0)
+            .where(*filters)
             .order_by(StudySession.updated_at.desc())
         ).scalars().first()
+
+    def close_open_sessions(self, deck_id: int) -> None:
+        """关闭该词本当前所有进行中的学习会话。"""
+        sessions = self.session.execute(
+            select(StudySession).where(StudySession.deck_id == deck_id, StudySession.status == 0)
+        ).scalars().all()
+        for study_session in sessions:
+            study_session.status = 1
 
     def remaining_new_count(self, deck_id: int) -> int:
         """统计词本中仍未背过的新词卡片总数。"""

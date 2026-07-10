@@ -54,10 +54,10 @@ class WordRepository:
         return word
 
     def search_words(
-        self, query: str, deck_id: int | None = None, limit: int = 50, starred_only: bool = False
+        self, query: str, deck_id: int | None = None, limit: int = 200, starred_only: bool = False
     ) -> list[Word]:
-        """按关键字搜索单词、释义。可过滤仅收藏。"""
-        stmt = select(Word)
+        """按关键字搜索单词、释义。可过滤仅收藏。预加载 card/deck 关联。"""
+        stmt = select(Word).options(joinedload(Word.card), joinedload(Word.deck))
         filters = []
         if query.strip():
             like = f"%{query.strip()}%"
@@ -72,7 +72,7 @@ class WordRepository:
         if filters:
             stmt = stmt.where(and_(*filters))
         stmt = stmt.order_by(Word.w).limit(limit)
-        return list(self.session.execute(stmt).scalars())
+        return list(self.session.execute(stmt).scalars().unique())
 
     def list_words_with_cards(self, deck_id: int) -> list[Word]:
         """加载词本下的所有单词及 FSRS 调度属性，包含所属词书。"""

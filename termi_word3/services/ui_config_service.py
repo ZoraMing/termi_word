@@ -7,12 +7,12 @@ from termi_word3.config import DATA_DIR
 
 DEFAULT_UI_CONFIG = {
     "footer": {
-        "today": "Ctrl+/ 搜索   Esc 退出",
-        "words": "↑↓ 选词   Space/Enter 详情   Esc 返回",
-        "calendar": "↑↓ 选中选项   Enter 修改目标值   Esc 返回",
-        "settings": "↑↓ 选择字段   Enter/Space 修改配置   Esc 返回",
-        "review": "Space 翻卡  1-4 评分  t 挂起  f 收藏  Esc 返回",
-        "spelling": "Enter 提交  Tab 提示  Space 答案  s 跳过  Esc 返回",
+        "today": "Ctrl+/ 搜索   Esc Esc 退出",
+        "words": "↑↓ 选词   Space/Enter 锁定详情   Esc 返回",
+        "calendar": "↑↓ 选择目标   Enter/Space 修改   Esc 返回",
+        "settings": "↑↓ 选择字段   Enter/Space 修改   Esc 返回",
+        "review": "Space 翻卡   1-4 评分   t 挂起   f 收藏   Esc 返回",
+        "spelling": "Enter 提交   Tab 提示   Space 答案   s 跳过   Esc 返回",
     }
 }
 

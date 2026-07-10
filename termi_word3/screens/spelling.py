@@ -8,7 +8,7 @@ from textual.widgets import Input, Static
 
 from termi_word3.database.models import Word
 from termi_word3.database.repositories import AppRepository
-from termi_word3.ui import TermiScreen, rule
+from termi_word3.ui import TermiScreen, rule, make_tui_progress_bar
 from termi_word3.ui.messages import format_spelling_result
 
 
@@ -68,41 +68,42 @@ class SpellingScreen(TermiScreen):
             if extra_words:
                 lines = [
                     "",
-                    "      今日拼写练习目标已完成！",
+                    "      今日拼写练习目标已完成。",
                     "",
                     "      还有可用词汇，您可以继续练习。",
                     "      按 Enter 键加载 20 个额外拼写单词，",
-                    "      或按 Esc 返回主界面。",
+                    "      或按 Esc 返回。",
                 ]
                 self._has_extra_option = True
                 self.refresh_ui(
-                    header="Spelling Practice / Extra Option",
+                    header="拼写 继续",
                     lines=lines,
                     message="",
-                    footer="Enter 额外拼写  Esc 返回首页"
+                    footer="Enter 额外拼写  Esc 返回"
                 )
             else:
                 lines = [
                     "",
-                    "      今日拼写练习任务已全部完成！",
+                    "      今日拼写练习任务已完成。",
                     "",
-                    "      请按 Esc 键返回主界面。",
+                    "      按 Esc 返回。",
                 ]
                 self._has_extra_option = False
                 self.refresh_ui(
-                    header="Spelling Practice / Complete",
+                    header="拼写 完成",
                     lines=lines,
                     message="",
-                    footer="Esc 返回首页"
+                    footer="Esc 返回"
                 )
             return
 
         # 2. 正常拼写状态显示
-        progress = f"[{self.index + 1}/{len(self.words)}]"
+        bar = make_tui_progress_bar(self.index + 1, len(self.words))
+        progress = f"{bar} [{self.index + 1}/{len(self.words)}]"
         answer_line = f"  正确答案：{word.w}" if self.show_answer else ""
         us_str = f"音标释义：/{word.us}/" if word.us else ""
         
-        mode_label = "Spelling Practice / Extra Input" if self.is_extra else "Spelling Practice / Input"
+        mode_label = "额外拼写 输入" if self.is_extra else "拼写 输入"
         lines = [
             f"  核心释义：{word.core or '-'}",
             f"  中文释义：{word.zh or '-'}",

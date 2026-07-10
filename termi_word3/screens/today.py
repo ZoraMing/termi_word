@@ -7,7 +7,12 @@ from textual.screen import Screen
 from textual.widgets import Static
 
 from termi_word3.database.repositories import AppRepository
-from termi_word3.ui import footer_height, render_content_block, render_footer, rule
+from termi_word3.services.home_shortcut_service import (
+    format_home_help,
+    format_home_menu,
+    home_shortcuts_from_setting,
+)
+from termi_word3.ui import render_content_block, render_footer, rule
 from termi_word3.ui.layout import compute_frame_layout
 
 
@@ -17,10 +22,10 @@ class TodayScreen(Screen):
     BINDINGS = [
         ("1", "study", "继续学习"),
         ("2", "review_only", "仅复习"),
-        ("4", "spelling", "拼写练习"),
-        ("5", "words", "词表"),
-        ("6", "calendar", "打卡日历"),
-        ("7", "settings", "设置参数"),
+        ("3", "spelling", "拼写练习"),
+        ("4", "words", "词表"),
+        ("5", "calendar", "打卡日历"),
+        ("6", "settings", "设置参数"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -42,17 +47,34 @@ class TodayScreen(Screen):
             self.app.open_search()
             return
 
+        shortcuts = home_shortcuts_from_setting(getattr(self.app, "settings", None))
+        actions = {
+            shortcuts["study"]: self.action_study,
+            shortcuts["review"]: self.action_review_only,
+            shortcuts["spelling"]: self.action_spelling,
+            shortcuts["words"]: self.action_words,
+            shortcuts["calendar"]: self.action_calendar,
+            shortcuts["settings"]: self.action_settings,
+        }
+        action = actions.get(event.key)
+        if action is not None:
+            event.stop()
+            action()
+            return
+
         if event.key in ("question_mark", "?"):
             event.stop()
             msg_widget = self.query_one("#message-area", Static)
             msg_widget.remove_class("success", "error")
             msg_widget.add_class("muted")
-            msg_widget.update("快捷键: 1-学习 | 2-仅复习 | 4-拼写 | 5-词表 | 6-打卡日历 | 7-设置 | Esc 退出")
+            msg_widget.update(format_home_help(shortcuts))
             return
 
     def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
-        with self.app.session_factory() as session:
-            setting = AppRepository(session).get_settings()
+        setting = getattr(self.app, "settings", None)
+        if setting is None:
+            with self.app.session_factory() as session:
+                setting = AppRepository(session).get_settings()
         
         layout = compute_frame_layout(
             terminal_width=self.size.width,
@@ -86,13 +108,17 @@ class TodayScreen(Screen):
 
     def refresh_summary(self) -> None:
         """从 SQLite 加载数据，重新刷新核心内容区。"""
-        footer_text = self.app.ui_config.footer("today")
+        setting = getattr(self.app, "settings", None)
+        cached_shortcuts = home_shortcuts_from_setting(setting)
+        footer_text = f"{format_home_help(cached_shortcuts)}   Ctrl+/ 搜索"
         content_height, width = self.apply_dynamic_layout(footer_text)
 
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             deck = repo.active_deck()
-            setting = repo.get_settings()
+            if setting is None:
+                setting = repo.get_settings()
+            shortcuts = home_shortcuts_from_setting(setting)
             
             deck_id = deck.id if deck else None
             deck_name = deck.name if deck else "无词本"
@@ -113,10 +139,10 @@ class TodayScreen(Screen):
             rule(width=width),
             f"当前词本：{deck_name:<10}  总词数：{total:<6}",
             f"每轮配置：新词 {setting.daily_new_target:<3} 复习 {setting.review_soft_limit:<3}   今日计划：拼写 {setting.daily_spelling_target:<3}",
-            f"当前完成：新词 {new_done:<2}  复习 {rev_done:<3}  拼写 {spelled:<3}  连续打卡 {streak:<2} 天",
+            f"当前完成：新词 [#F59E0B]{new_done:<2}[/]  复习 [#00D4AA]{rev_done:<3}[/]  拼写 [#00D4AA]{spelled:<3}[/]  连续打卡 [#4ADE80]{streak:<2}[/] 天",
             f"坚持计划：剩余新词数 {remaining:<5}",
             rule(width=width),
-            f"[1]学习  [2]复习  [4]拼写  [5]词表  [6]日历  [7]设置",
+            format_home_menu(shortcuts),
         ]
 
         self.query_one("#content-area", Static).update(
@@ -127,11 +153,12 @@ class TodayScreen(Screen):
         msg_widget.remove_class("success", "error", "muted")
         if total == 0:
             msg_widget.add_class("error")
-            msg_widget.update("⚠️ 词本词数为 0！请在 [7]设置 中执行同步词包。")
+            msg_widget.update(f"词本为空。请在 [{shortcuts['settings']}] 设置中同步词包。")
         else:
             msg_widget.update("")
             
-        self.query_one("#footer-area", Static).update(render_footer(footer_text, width))
+        footer = f"{format_home_help(shortcuts)}   Ctrl+/ 搜索"
+        self.query_one("#footer-area", Static).update(render_footer(footer, width))
 
     # 快捷键动作分发
     def action_study(self) -> None:

@@ -9,15 +9,9 @@ from sqlalchemy.orm import Session
 from termi_word3.database.models import Card, Deck, Setting, StudySession, Word
 from termi_word3.database.settings_repository import SettingsRepository
 from termi_word3.database.deck_repository import DeckRepository
-from termi_word3.database.word_repository import WordRepository
+from termi_word3.database.word_repository import WordRepository, normalize_word
 from termi_word3.database.study_repository import StudyRepository
 from termi_word3.database.stats_repository import StatsRepository
-
-
-def normalize_word(value: str) -> str:
-    """去首尾空格，转小写，规范化多余空格。"""
-    return " ".join(value.strip().lower().split())
-
 
 class AppRepository:
     """Termi Word 统一数据存取层 (过渡期 Facade 兼容层)。"""
@@ -28,7 +22,7 @@ class AppRepository:
         self.deck_repo = DeckRepository(self.session, self.settings_repo)
         self.word_repo = WordRepository(self.session)
         self.study_repo = StudyRepository(self.session)
-        self.stats_repo = StatsRepository(self.session)
+        self.stats_repo = StatsRepository(self.session, self.settings_repo)
 
     def get_settings(self) -> Setting:
         """获取或创建唯一的全局设置行。"""
@@ -96,13 +90,21 @@ class AppRepository:
         """获取所有发生过背词或拼写的物理日期，返回去重集合。"""
         return self.stats_repo.activity_dates()
 
+    def activity_dates_between(self, start_date: date, end_date: date) -> set[date]:
+        """获取指定日期范围内发生过背词或拼写的物理日期。"""
+        return self.stats_repo.activity_dates_between(start_date, end_date)
+
     def streak_days(self) -> int:
         """根据活动历史记录，计算当前连续背词打卡天数。"""
         return self.stats_repo.streak_days()
 
-    def open_session(self, deck_id: int) -> StudySession | None:
+    def open_session(self, deck_id: int, session_date: date | None = None) -> StudySession | None:
         """获取该词本当前活跃（进行中）的学习会话。"""
-        return self.study_repo.open_session(deck_id)
+        return self.study_repo.open_session(deck_id, session_date)
+
+    def close_open_sessions(self, deck_id: int) -> None:
+        """关闭该词本当前所有进行中的学习会话。"""
+        self.study_repo.close_open_sessions(deck_id)
 
     def get_word_by_id(self, word_id: int) -> Word | None:
         """根据单词 ID 获取单词信息"""

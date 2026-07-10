@@ -268,13 +268,52 @@ class TermiScreen(Screen):
             content_widget = self.query_one("#content-area", Static)
             msg_widget = self.query_one("#message-area", Static)
             footer_widget = self.query_one("#footer-area", Static)
+            container = self.query_one(".frame-container", Static)
         except Exception:
             return  # 组件尚未就绪
 
         # 1. 动态高度计算
         content_height, width = self.compute_dynamic_layout()
 
-        # 2. 组装 Content 内容：Header + 分割线 + 主体 lines
+        # 2. 动态更新 Widget 物理样式高度，消除 app.tcss 硬编码对 frame 的锁死限制
+        setting = getattr(self.app, "settings", None)
+        if setting is None:
+            from types import SimpleNamespace
+            setting = SimpleNamespace(panel_min_height=6, panel_max_height=16, panel_max_width=68)
+            
+        from textual.widgets import Input
+        has_input = False
+        try:
+            inp = self.query_one(Input)
+            if inp.display:
+                has_input = True
+        except Exception:
+            pass
+
+        from termi_word3.ui.layout import compute_frame_layout
+        layout = compute_frame_layout(
+            terminal_width=self.size.width,
+            terminal_height=self.size.height,
+            panel_min_height=setting.panel_min_height,
+            panel_max_height=setting.panel_max_height,
+            panel_max_width=setting.panel_max_width,
+            footer_text=self._last_footer,
+            has_input=has_input,
+            message_rows=1,
+        )
+        
+        container.styles.height = layout.frame_height
+        container.styles.min_height = layout.frame_height
+        container.styles.max_height = layout.frame_height
+        container.styles.width = layout.frame_width
+        
+        footer_widget.styles.height = layout.footer_rows
+
+        content_widget.styles.height = layout.content_height
+        content_widget.styles.min_height = layout.content_height
+        content_widget.styles.max_height = layout.content_height
+
+        # 3. 组装 Content 内容：Header + 分割线 + 主体 lines
         final_lines = []
         if self._last_header:
             final_lines.append(self._last_header)
@@ -282,8 +321,8 @@ class TermiScreen(Screen):
 
         final_lines.extend(self._last_lines)
 
-        # 3. 填充与截断
-        rendered_content = render_content_block(final_lines, height=content_height, width=width)
+        # 4. 填充与截断
+        rendered_content = render_content_block(final_lines, height=layout.content_height, width=width)
         content_widget.update(rendered_content)
 
         # 4. 更新消息区
@@ -307,9 +346,10 @@ class TermiScreen(Screen):
         except Exception:
             pass
 
-        with self.app.session_factory() as session:
-            from termi_word3.database.repositories import AppRepository
-            setting = AppRepository(session).get_settings()
+        setting = getattr(self.app, "settings", None)
+        if setting is None:
+            from types import SimpleNamespace
+            setting = SimpleNamespace(panel_min_height=MIN_PANEL_HEIGHT, panel_max_height=MAX_PANEL_HEIGHT, panel_max_width=PANEL_WIDTH)
             
         from termi_word3.ui.layout import compute_frame_layout
         layout = compute_frame_layout(
@@ -342,3 +382,13 @@ class TermiScreen(Screen):
     def on_resize(self) -> None:
         """全屏尺寸变化自动响应重绘。"""
         self.draw_frame()
+
+
+def make_tui_progress_bar(current: int, total: int, width: int = 6) -> str:
+    """生成 TUI 极客风格进度条，由 █ 和 ░ 拼接，默认宽度为 6 字符（占宽 12）"""
+    if total <= 0:
+        return ""
+    ratio = max(0.0, min(1.0, current / total))
+    active = int(ratio * width)
+    inactive = width - active
+    return f"[#4ADE80]{'█' * active}[/][#4b5563]{'░' * inactive}[/]"

@@ -15,7 +15,8 @@ from textual.widgets import Static
 
 from termi_word3.config import DATA_DIR
 from termi_word3.database.repositories import AppRepository
-from termi_word3.services.import_service import ImportService
+from termi_word3.domain.results import ImportResult
+from termi_word3.services.import_service import ImportRow, ImportService
 from termi_word3.ui.messages import format_import_result
 from termi_word3.ui.layout import compute_frame_layout
 from termi_word3.ui import (
@@ -67,6 +68,8 @@ class DeckConfigScreen(Screen):
         self._pending_deck_key = ""
         self._pending_mapping_key = ""
         self._pending_mapping_label = ""
+        self._import_worker = None
+        self._is_importing = False
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
@@ -103,7 +106,7 @@ class DeckConfigScreen(Screen):
                     self.last_msg = "正在同步词包数据中..."
                     self.last_msg_severity = "info"
                     self.render_panel()
-                    self.run_worker(self.run_csv_import(), exclusive=True)
+                    self.start_csv_import()
                 elif action == "change_mapping":
                     field_name = self._pending_mapping_key[4:]
                     current_mapping = self.mapping.get(field_name) or "(未绑定)"
@@ -126,7 +129,7 @@ class DeckConfigScreen(Screen):
                 elif action == "execute_import":
                     self.last_msg = "正在同步词包数据中..."
                     self.render_panel()
-                    self.run_worker(self.run_csv_import(), exclusive=True)
+                    self.start_csv_import()
 
                 return
             elif key == self.pending_action.cancel_key:
@@ -242,8 +245,10 @@ class DeckConfigScreen(Screen):
         self.selected = min(self.selected, max(0, len(self.items) - 1))
         
     def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
-        with self.app.session_factory() as session:
-            setting = AppRepository(session).get_settings()
+        setting = getattr(self.app, "settings", None)
+        if setting is None:
+            with self.app.session_factory() as session:
+                setting = AppRepository(session).get_settings()
         
         layout = compute_frame_layout(
             terminal_width=self.size.width,
@@ -324,7 +329,19 @@ class DeckConfigScreen(Screen):
         self.render_panel()
 
     def action_back(self) -> None:
+        self.cancel_import_worker()
         self.app.pop_screen()
+
+    def on_unmount(self) -> None:
+        self.cancel_import_worker()
+
+    def cancel_import_worker(self) -> None:
+        """取消仍在运行的词书同步 worker。"""
+        if self._import_worker is not None:
+            self._import_worker.cancel()
+            self._unregister_worker(self._import_worker)
+            self._import_worker = None
+        self._is_importing = False
 
     def action_select(self) -> None:
         """用户确认或修改某项"""
@@ -395,6 +412,17 @@ class DeckConfigScreen(Screen):
             self.render_panel()
             return
 
+    def start_csv_import(self) -> None:
+        """启动词书同步 worker，并阻止重复导入。"""
+        if self._is_importing:
+            self.last_msg = "词书同步正在进行中，请稍候。"
+            self.last_msg_severity = "info"
+            self.render_panel()
+            return
+        self._is_importing = True
+        self._import_worker = self.run_worker(self.run_csv_import(), exclusive=True)
+        self._register_worker(self._import_worker)
+
     def save_deck_selection(self) -> None:
         """保存当前所选词书配置"""
         deck_stem = Path(self.active_deck_name).stem
@@ -429,8 +457,13 @@ class DeckConfigScreen(Screen):
         import_service = ImportService(self.app.session_factory, csv_path=DATA_DIR / self.active_deck_name)
         
         try:
-            # 执行增量导入/覆盖
-            result = await asyncio.to_thread(import_service.import_rows, deck_stem)
+            csv_to_use, rows, missing = await asyncio.to_thread(import_service.read_source_rows, deck_stem)
+            if not csv_to_use.exists():
+                result = ImportResult(source_missing=str(csv_to_use))
+            elif missing:
+                result = ImportResult(missing_fields=missing)
+            else:
+                result = await self._import_rows_in_batches(import_service, deck_stem, rows)
             res_msg = format_import_result(result)
             if result.missing_fields:
                 self.last_msg = res_msg
@@ -447,4 +480,52 @@ class DeckConfigScreen(Screen):
         except Exception as e:
             self.last_msg = f"同步失败（系统异常）: {e}"
             self.last_msg_severity = "error"
-        self.render_panel()
+        finally:
+            self._is_importing = False
+            self._unregister_worker(self._import_worker)
+            self._import_worker = None
+        if getattr(self, "is_mounted", True):
+            self.render_panel()
+
+    async def _import_rows_in_batches(
+        self,
+        import_service: ImportService,
+        deck_stem: str,
+        rows: list[ImportRow],
+    ) -> ImportResult:
+        """按批写入数据库，避免一个不可取消的大型 to_thread 任务。"""
+        imported = 0
+        updated = 0
+        skipped = 0
+        batch_size = import_service.BATCH_SIZE
+
+        for start in range(0, len(rows), batch_size):
+            await asyncio.sleep(0)
+            batch = rows[start:start + batch_size]
+            partial = await asyncio.to_thread(
+                import_service.import_prepared_rows,
+                deck_stem,
+                batch,
+                set(),
+            )
+            imported += partial.imported
+            updated += partial.updated
+            skipped += partial.skipped
+
+        return ImportResult(imported=imported, updated=updated, skipped=skipped)
+
+    def _register_worker(self, worker) -> None:
+        try:
+            app = self.app
+        except Exception:
+            return
+        if hasattr(app, "register_worker"):
+            app.register_worker(worker)
+
+    def _unregister_worker(self, worker) -> None:
+        try:
+            app = self.app
+        except Exception:
+            return
+        if hasattr(app, "unregister_worker"):
+            app.unregister_worker(worker)

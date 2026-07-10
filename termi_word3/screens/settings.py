@@ -9,7 +9,13 @@ from textual.screen import Screen
 from textual.widgets import Input, Static
 
 from termi_word3.database.repositories import AppRepository
-from termi_word3.ui import field_row, footer_height, render_content_block, render_footer, rule
+from termi_word3.services.home_shortcut_service import (
+    HOME_ACTIONS,
+    normalize_shortcut,
+    validate_home_shortcuts,
+)
+from termi_word3.services.time_service import TimeSettingsService, format_offset, parse_offset
+from termi_word3.ui import field_row, render_content_block, render_footer, rule, scroll_window
 from termi_word3.ui.layout import compute_frame_layout
 
 
@@ -17,18 +23,31 @@ class SettingsScreen(Screen):
     """全局系统配置页面。"""
 
     can_focus = True
+    PLAN_FIELDS = {"daily_new_target", "review_soft_limit", "daily_spelling_target"}
 
     fields = [
         ("daily_new_target", "每轮新词", "int"),
         ("review_soft_limit", "每轮复习", "int"),
         ("daily_spelling_target", "每日拼写", "int"),
-        ("spelling_enabled", "启用拼写", "bool"),
         ("search_shortcut", "搜索快捷键", "text"),
+        ("home_key_study", "快捷键: 学习", "home_key"),
+        ("home_key_review", "快捷键: 复习", "home_key"),
+        ("home_key_spelling", "快捷键: 拼写", "home_key"),
+        ("home_key_words", "快捷键: 词表", "home_key"),
+        ("home_key_calendar", "快捷键: 日历", "home_key"),
+        ("home_key_settings", "快捷键: 设置", "home_key"),
+        ("timezone_offset_minutes", "本地时区", "timezone"),
         ("panel_max_width", "最大宽度", "int"),
         ("panel_min_height", "最小高度", "int"),
         ("panel_max_height", "最大高度", "int"),
         ("deck_config", "词书与映射管理", "navigate"),
     ]
+    sections = {
+        0: "学习计划",
+        3: "快捷键",
+        10: "时间与界面",
+        14: "词书管理",
+    }
 
     # 快捷键友好名称映射
     FRIENDLY_SHORTCUTS = {
@@ -49,6 +68,7 @@ class SettingsScreen(Screen):
         self.deck_name = "无活跃词本"
         self.last_msg = ""
         self.last_msg_severity = "info"
+        self._settings_scroll_offset = 0
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
@@ -82,14 +102,18 @@ class SettingsScreen(Screen):
                 val = getattr(setting, key)
                 if kind == "bool":
                     self.values[key] = bool(val)
-                elif kind == "text":
+                elif kind == "timezone":
+                    self.values[key] = int(val) if val is not None else 0
+                elif kind in {"text", "home_key"}:
                     self.values[key] = str(val or "")
                 else:
                     self.values[key] = max(0, int(val or 0))
 
     def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
-        with self.app.session_factory() as session:
-            setting = AppRepository(session).get_settings()
+        setting = getattr(self.app, "settings", None)
+        if setting is None:
+            with self.app.session_factory() as session:
+                setting = AppRepository(session).get_settings()
         
         layout = compute_frame_layout(
             terminal_width=self.size.width,
@@ -129,16 +153,23 @@ class SettingsScreen(Screen):
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
 
-        title = "Settings / Editing" if self.editing else "Settings"
+        title = "设置 编辑" if self.editing else "设置"
         body_lines = []
+        selected_line = 0
 
         for index, (key, label, kind) in enumerate(self.fields):
+            if index in self.sections:
+                body_lines.append(f"[muted]{self.sections[index]}[/]")
             is_sel = index == self.selected
             is_edit = self.editing and is_sel
+            if is_sel:
+                selected_line = len(body_lines)
 
             if kind == "bool":
                 val_str = "是" if self.values[key] else "否"
-            elif kind == "text":
+            elif kind == "timezone":
+                val_str = format_offset(int(self.values[key]))
+            elif kind in {"text", "home_key"}:
                 val_str = self.FRIENDLY_SHORTCUTS.get(
                     str(self.values[key]), str(self.values[key])
                 )
@@ -150,10 +181,10 @@ class SettingsScreen(Screen):
             )
 
         eff_height = max(1, content_height - 2)
-        while len(body_lines) < eff_height:
-            body_lines.append("")
+        self._settings_scroll_offset = self._clamp_scroll(selected_line, eff_height)
+        visible_body = scroll_window(body_lines, eff_height, self._settings_scroll_offset)
 
-        lines = [title, rule(width=width)] + body_lines
+        lines = [title, rule(width=width)] + visible_body
         content_widget.update(render_content_block(lines, height=content_height, width=width))
         msg_widget.remove_class("success", "error", "muted")
         if self.last_msg_severity != "info":
@@ -161,6 +192,17 @@ class SettingsScreen(Screen):
 
         msg_widget.update(self.last_msg or "按 ↑↓ 选择字段，Enter/Space 修改或切换")
         footer_widget.update(render_footer(footer_text, width))
+
+    def _clamp_scroll(self, selected_line: int, height: int) -> int:
+        """让当前选中项始终留在可视区域内。"""
+        total_lines = len(self.fields) + len(self.sections)
+        max_offset = max(0, total_lines - height)
+        offset = max(0, min(self._settings_scroll_offset, max_offset))
+        if selected_line < offset:
+            return selected_line
+        if selected_line >= offset + height:
+            return min(max_offset, selected_line - height + 1)
+        return offset
 
     def on_key(self, event: Key) -> None:
         """全局键盘事件拦截。"""
@@ -235,7 +277,13 @@ class SettingsScreen(Screen):
 
         inp_row.display = True
         inp.display = True
-        if kind == "text":
+        if kind == "timezone":
+            inp.value = format_offset(int(self.values[key]))
+            self.last_msg = f"正在修改【{label}】，格式示例: +08:00 或 -05:00"
+        elif kind == "home_key":
+            inp.value = str(self.values[key])
+            self.last_msg = f"正在修改【{label}】，不可与其他首页快捷键或全局搜索重复"
+        elif kind == "text":
             friendly = self.FRIENDLY_SHORTCUTS.get(str(self.values[key]), str(self.values[key]))
             inp.value = friendly
             self.last_msg = f"正在修改【{label}】，可选: Ctrl+/ Ctrl+P Ctrl+S Ctrl+F Ctrl+K Ctrl+Q"
@@ -256,14 +304,27 @@ class SettingsScreen(Screen):
         raw = event.value.strip()
 
         try:
-            if kind == "text":
+            if kind == "timezone":
+                val = parse_offset(raw)
+                self.values[key] = val
+                self._save_values()
+                TimeSettingsService().save_config(val)
+                self.last_msg = f"修改成功。【{label}】设定为 {format_offset(val)}。"
+                self.last_msg_severity = "success"
+            elif kind == "home_key":
+                val = normalize_shortcut(raw)
+                self.values[key] = val
+                self._save_values()
+                self.last_msg = f"修改成功。【{label}】设定为 {val}。"
+                self.last_msg_severity = "success"
+            elif kind == "text":
                 val = self.SHORTCUT_KEYS.get(raw, raw.lower().replace(" ", ""))
                 if not val:
                     raise ValueError("快捷键不能为空")
                 self.values[key] = val
                 friendly = self.FRIENDLY_SHORTCUTS.get(val, val)
                 self._save_values()
-                self.last_msg = f"修改成功！【{label}】设定为 {friendly}。"
+                self.last_msg = f"修改成功。【{label}】设定为 {friendly}。"
             else:
                 val = int(raw or "0")
                 if val < 0:
@@ -285,8 +346,8 @@ class SettingsScreen(Screen):
                     raise ValueError("最小高度不能大于最大高度")
 
                 self.values[key] = val
-                self._save_values()
-                self.last_msg = f"修改成功！【{label}】设定为 {val}。"
+                self._save_values(reset_study_sessions=key in self.PLAN_FIELDS)
+                self.last_msg = f"修改成功。【{label}】设定为 {val}。"
                 self.last_msg_severity = "success"
             self._close_editor()
         except (ValueError, StatementError) as err:
@@ -304,25 +365,45 @@ class SettingsScreen(Screen):
         self.focus()
         self.render_settings()
 
-    def _save_values(self) -> None:
+    def _save_values(self, reset_study_sessions: bool = False) -> None:
         """持久化当前所有的配置修改到 SQLite 数据库中。"""
+        shortcuts = {
+            action: normalize_shortcut(self.values[f"home_key_{action}"])
+            for action, _label in HOME_ACTIONS
+        }
+        reserved = {
+            normalize_shortcut(self.values.get("search_shortcut")),
+            "ctrl+/",
+            "ctrl+_",
+            "ctrl+underscore",
+            "ctrl+shift+slash",
+            "ctrl+shift+underscore",
+        }
+        validate_home_shortcuts(shortcuts, reserved=reserved)
         try:
             with self.app.session_factory() as session:
-                setting = AppRepository(session).get_settings()
+                repo = AppRepository(session)
+                setting = repo.get_settings()
                 for key, _, kind in self.fields:
                     if kind == "navigate":
                         continue
                     val = self.values[key]
                     if kind == "bool":
                         setattr(setting, key, bool(val))
-                    elif kind == "text":
+                    elif kind == "timezone":
+                        setattr(setting, key, int(val) if val is not None else None)
+                    elif kind in {"text", "home_key"}:
                         setattr(setting, key, str(val or ""))
                     else:
                         setattr(setting, key, max(0, int(val or 0)))
+                if reset_study_sessions:
+                    deck = repo.active_deck()
+                    if deck is not None:
+                        repo.close_open_sessions(deck.id)
                 session.commit()
-            # 刷新主应用的搜索快捷键缓存
-            self.app.refresh_search_shortcut()
+            self.app.refresh_settings_cache()
         except Exception as err:
             self.last_msg = f"配置保存失败：{err}"
             self.last_msg_severity = "error"
             self.render_settings()
+            raise ValueError(err) from err

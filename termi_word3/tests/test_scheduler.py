@@ -73,3 +73,15 @@ class TestSchedulerTimezone(unittest.TestCase):
         # 第 4 次打分
         log4 = self.scheduler_service.review(card, 4)
         self.assertEqual(card.reps, 4)
+
+    def test_business_date_uses_configured_local_timezone(self) -> None:
+        """业务日期应按用户配置的本地时区计算，而不是直接使用 UTC 日期。"""
+        service = SchedulerService(
+            now=lambda: datetime.datetime(2026, 7, 10, 17, 0, tzinfo=datetime.timezone.utc),
+            timezone_offset_minutes=480,
+        )
+
+        due = datetime.datetime(2026, 7, 11, 1, 0)
+
+        self.assertEqual(service.business_date(due), datetime.date(2026, 7, 11))
+        self.assertEqual(service.scheduled_days_until(due), 0)

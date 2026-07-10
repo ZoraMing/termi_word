@@ -2,24 +2,34 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from fsrs import Card as FsrsCard
 from fsrs import Rating, Scheduler, State
 
 from termi_word3.database.models import Card, ReviewLog
+from termi_word3.services.time_service import system_timezone_offset_minutes, timezone_from_offset
 
 
-def default_utc_now() -> datetime:
-    """获取带 UTC 时区的当前时间"""
-    return datetime.now(timezone.utc)
+def default_local_now() -> datetime:
+    """获取系统本地时区的当前时间。"""
+    return datetime.now().astimezone()
 
 
 class SchedulerService:
     """包装 py-fsrs 对卡片进行间隔调度的计算逻辑。"""
 
-    def __init__(self, now: Callable[[], datetime] = default_utc_now) -> None:
+    def __init__(
+        self,
+        now: Callable[[], datetime] = default_local_now,
+        timezone_offset_minutes: int | None = None,
+    ) -> None:
         self.scheduler = Scheduler(enable_fuzzing=False)
         self.now = now
+        self.timezone_offset_minutes = (
+            system_timezone_offset_minutes(now())
+            if timezone_offset_minutes is None
+            else int(timezone_offset_minutes)
+        )
 
     def review(self, card: Card, rating_value: int) -> ReviewLog:
         """根据用户评分更新 FSRS 卡片记忆属性，并返回关联的历史日志。"""
@@ -30,7 +40,7 @@ class SchedulerService:
         before_last_review = card.last_review
 
         fsrs_card = self._to_fsrs_card(card)
-        current_time = self.now()
+        current_time = self._now_utc()
         
         # 显式传入带时区的当前时间，防止 scheduler.review_card 内部因默认时区造成 offset 错误
         reviewed_card, _fsrs_log = self.scheduler.review_card(fsrs_card, rating, current_time)
@@ -82,6 +92,24 @@ class SchedulerService:
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
 
+    def _now_utc(self) -> datetime:
+        """返回 FSRS 要求的 UTC aware 当前时间。"""
+        value = self.now()
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone_from_offset(self.timezone_offset_minutes))
+        return value.astimezone(timezone.utc)
+
+    def business_date(self, dt: datetime | None = None) -> date:
+        """按用户本地时区换算业务日期。数据库 naive datetime 视为 UTC 存储。"""
+        value = dt or self.now()
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone_from_offset(self.timezone_offset_minutes)).date()
+
+    def scheduled_days_until(self, due: datetime) -> int:
+        """按本地业务日期计算到期天数。"""
+        return max(0, (self.business_date(due) - self.business_date()).days)
+
     def _apply_fsrs_card(self, target: Card, source: FsrsCard, before_last_review: datetime | None) -> None:
         """将 FSRS 卡片属性回填应用到 SQLAlchemy 的卡片模型中，彻底剥离时区存回 SQLite。"""
         target.state = int(source.state.value)
@@ -100,11 +128,8 @@ class SchedulerService:
         # 提取 date 防止类型混淆相减
         current_time = self.now()
         if before_last_review:
-            b_date = before_last_review.date() if hasattr(before_last_review, "date") else before_last_review
-            target.elapsed_days = max(0, (current_time.date() - b_date).days)
+            target.elapsed_days = max(0, (self.business_date(current_time) - self.business_date(before_last_review)).days)
         else:
             target.elapsed_days = 0
             
-        # target.due 剥离时区后与 naive utcnown.date 运算
-        target_due_date = target.due.date() if hasattr(target.due, "date") else target.due
-        target.scheduled_days = max(0, (target_due_date - current_time.date()).days)
+        target.scheduled_days = self.scheduled_days_until(target.due)

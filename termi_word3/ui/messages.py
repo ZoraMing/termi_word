@@ -26,8 +26,8 @@ def format_import_result(result: ImportResult) -> str:
 def format_spelling_result(result: SpellingResult) -> str:
     """格式化拼写结果文案"""
     if result.is_correct:
-        return "太棒了，拼写正确！"
-    return f"拼写错误。正确拼写应为: {result.expected}"
+        return "拼写正确。"
+    return f"拼写错误。正确拼写：{result.expected}"
 
 
 def format_study_action_result(result: StudyActionResult) -> str:

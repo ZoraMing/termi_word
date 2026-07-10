@@ -24,6 +24,8 @@ class ImportRow:
 class ImportService:
     """负责将 CSV 格式的词表数据导入到本地 SQLite 数据库中。"""
 
+    BATCH_SIZE = 200
+
     def __init__(self, session_factory: sessionmaker, csv_path: Path | None = None) -> None:
         self.session_factory = session_factory
         self.csv_path = csv_path or DEFAULT_CSV_PATH
@@ -132,6 +134,16 @@ class ImportService:
         if missing:
             return ImportResult(missing_fields=missing)
 
+        skip_rows = skip_rows or set()
+        return self.import_prepared_rows(deck_name, rows, skip_rows)
+
+    def import_prepared_rows(
+        self,
+        deck_name: str,
+        rows: list[ImportRow],
+        skip_rows: set[int] | None = None,
+    ) -> ImportResult:
+        """导入已读取的行数据，供 UI worker 按批取消。"""
         skip_rows = skip_rows or set()
         imported = 0
         updated = 0

@@ -13,7 +13,7 @@ from rich.markup import escape
 
 from termi_word3.database.models import Word
 from termi_word3.database.repositories import AppRepository
-from termi_word3.ui import footer_height, render_content_block, render_footer, rule
+from termi_word3.ui import footer_height, render_content_block, render_footer, rule, _pad_to_width, wrap_display
 from termi_word3.ui.layout import compute_frame_layout
 
 
@@ -62,8 +62,9 @@ class WordsScreen(Screen):
         self.show_detail = True
         self.detail_selected = False
         self.starred_only = False
-        self.entries: list[WordEntry] = []
         self.results: list[WordEntry] = []
+        self.total_count: int = 0
+        self._search_timer = None
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
@@ -75,60 +76,53 @@ class WordsScreen(Screen):
             yield Static(id="footer-area")
 
     def on_mount(self) -> None:
-        self.load_cache()
-        self.apply_filter()
+        self._do_search()
         self.render_words()
         if self.focus_search_on_mount:
-            self.query_one("#words-search-input", Input).focus()
+            self.focus_search_input()
 
-    def load_cache(self) -> None:
-        """加载单词并混淆，若未指定 deck_id 则加载全库所有词本的全部单词进行全局搜索。"""
+    def _do_search(self) -> None:
+        """从数据库查询当前搜索条件下的单词列表，替代全量内存缓存。"""
         with self.app.session_factory() as session:
             repo = AppRepository(session)
-            if self.deck_id is not None:
-                words = repo.list_words_with_cards(self.deck_id)
-            else:
-                words = repo.list_all_words_with_cards()
-        self.entries = [
-            WordEntry(
-                word=word,
-                search_text=self._search_text(word),
-                status=self._mastery(word),
+            words = repo.search_words(
+                query=self.search_query,
+                deck_id=self.deck_id,
+                limit=200,
+                starred_only=self.starred_only,
             )
-            for word in words
-        ]
-        # 用日期作为随机种子，保证同一天乱序一致
-        seed = int(date.today().strftime("%Y%m%d"))
-        random.Random(seed).shuffle(self.entries)
+            self.total_count = repo.word_count(self.deck_id)
 
-    def apply_filter(self) -> None:
-        """根据搜索字符串和收藏条件过滤候选单词，并限制搜索结果数量以防渲染卡顿。"""
+        # 对 DB 粗筛结果做应用层精排
         query = self.search_query.strip().lower()
-        
-        # 1. 过滤收藏
-        filtered = self.entries
-        if self.starred_only:
-            filtered = [e for e in filtered if e.word.is_starred]
-
-        # 2. 匹配过滤
-        if not query:
-            self.results = filtered
-        else:
-            scored = [(self._score(entry, query), entry) for entry in filtered]
-            sorted_entries = [
-                entry
-                for score, entry in sorted(scored, key=lambda item: item[0], reverse=True)
-                if score > 0
+        if query:
+            scored = [
+                (score_word_search(w.w, w.zh or "", self._search_text(w), query), w)
+                for w in words
             ]
-            self.results = sorted_entries[:200]
+            scored.sort(key=lambda x: x[0], reverse=True)
+            self.results = [
+                WordEntry(word=w, search_text=self._search_text(w), status=self._mastery(w))
+                for s, w in scored if s > 0
+            ]
+        else:
+            # 无搜索词时，用日期种子 shuffle（保证同一天乱序一致）
+            seed = int(date.today().strftime("%Y%m%d"))
+            random.Random(seed).shuffle(words)
+            self.results = [
+                WordEntry(word=w, search_text=self._search_text(w), status=self._mastery(w))
+                for w in words
+            ]
 
         # 重调选中项索引范围防止越界
         self.selected = min(self.selected, max(0, len(self.results) - 1))
         self.list_offset = min(self.list_offset, self.selected)
 
     def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
-        with self.app.session_factory() as session:
-            setting = AppRepository(session).get_settings()
+        setting = getattr(self.app, "settings", None)
+        if setting is None:
+            with self.app.session_factory() as session:
+                setting = AppRepository(session).get_settings()
         
         layout = compute_frame_layout(
             terminal_width=self.size.width,
@@ -166,7 +160,7 @@ class WordsScreen(Screen):
         
         # 实时动态配置 Footer 栏的提示信息
         if self_focus:
-            footer_text = "键入搜索  Space/Enter 确认并锁定详情  Esc 退出搜索"
+            footer_text = "键入搜索  Space/Enter 锁定详情  Esc 退出搜索/再按返回"
         elif self.detail_selected:
             footer_text = "↑↓ 滚动查看释义  ←→ 横向滚动  Esc 退出详情锁定"
         else:
@@ -176,9 +170,9 @@ class WordsScreen(Screen):
         content_widget = self.query_one("#content-area", Static)
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
-        mode_label = "Words / Search" if self_focus else "Words / Browse"
-        if self.detail_selected:
-            mode_label = "Words / Detail Locked"
+        mode_label = "词表 搜索" if self_focus else "词表 浏览"
+        if self.show_detail and self.results and self.detail_selected:
+            mode_label = "词表 详情锁定"
 
         lines = [
             mode_label,
@@ -197,7 +191,6 @@ class WordsScreen(Screen):
             pointer = "> " if index == self.selected else "  "
             word = entry.word
             meaning = word.zh or word.core or word.en or ""
-            star = "*" if word.is_starred else " "
             
             # 自适应宽度裁剪，以单词最大占宽比 16 位为例，如果宽度短，按比例裁剪
             w_w = max(10, min(16, width // 4))
@@ -206,15 +199,18 @@ class WordsScreen(Screen):
             # 转义各数据项以防止 Rich Markup 注入导致的样式泄露与文本吞没
             w_esc = escape(word.w)
             status_esc = escape(entry.status)
-            star_esc = escape(star)
             deck_tag_esc = escape(deck_tag)
             c_esc = escape(word.c or '-')
             meaning_esc = escape(meaning)
             
-            line_content = f"{pointer}{w_esc:<{w_w}} {status_esc:<4}{star_esc}{deck_tag_esc} \\[{c_esc}\\] {meaning_esc}"
+            w_pad = _pad_to_width(w_esc, w_w)
+            status_pad = _pad_to_width(status_esc, 4)
+            star_markup = "[#F59E0B]*[/]" if word.is_starred else " "
+            
+            line_content = f"{pointer}{w_pad} {status_pad}{star_markup}{deck_tag_esc} \\[{c_esc}\\] {meaning_esc}"
             if index == self.selected:
-                # 选中行背景高亮，文字高亮黄，底色深灰
-                lines.append(f"[bold #FBBF24 on #1f2937]{line_content}[/]")
+                # 选中行背景高亮，文字高亮橙，底色深灰
+                lines.append(f"[#F59E0B on #1f2937]{line_content}[/]")
             else:
                 lines.append(line_content)
 
@@ -227,7 +223,7 @@ class WordsScreen(Screen):
         # 渲染底部详情或统计
         if self.show_detail and self.results:
             lines.append(rule(width=width))
-            detail_all = self._detail_lines(self.results[self.selected].word)
+            detail_all = self._detail_lines(self.results[self.selected].word, width)
             total = len(detail_all)
             if total > max_detail:
                 self.detail_scroll_y = max(0, min(self.detail_scroll_y, total - max_detail))
@@ -245,7 +241,7 @@ class WordsScreen(Screen):
             lines.extend(visible_detail)
         else:
             lines.append(
-                f"  统计: 已筛选出 {len(self.results)} / {len(self.entries)} 个词"
+                f"  统计: 已筛选出 {len(self.results)} / {self.total_count} 个词"
             )
 
         content_widget.update(render_content_block(lines, height=content_height, width=width))
@@ -271,12 +267,31 @@ class WordsScreen(Screen):
 
         footer_widget.update(render_footer(footer_text, width))
 
+    def focus_search_input(self, reset_query: bool = False) -> None:
+        """聚焦搜索输入框；默认保留用户当前查询。"""
+        inp = self.query_one("#words-search-input", Input)
+        if reset_query:
+            inp.value = ""
+            self.search_query = ""
+            self._do_search()
+        inp.focus()
+        self.call_later(self.render_words)
+
     def on_input_changed(self, event: Input.Changed) -> None:
-        """输入内容变化时实时匹配过滤。"""
+        """输入内容变化时防抖后查询数据库。"""
         if event.input.id == "words-search-input":
             self.search_query = event.value
-            self.apply_filter()
-            self.render_words()
+            # 取消上一个待执行的搜索定时器
+            if self._search_timer is not None:
+                self._search_timer.stop()
+            # 200ms 后再执行搜索，避免快速连按时频繁查库
+            self._search_timer = self.set_timer(0.2, self._debounced_search)
+
+    def _debounced_search(self) -> None:
+        """防抖定时器触发后执行实际搜索。"""
+        self._search_timer = None
+        self._do_search()
+        self.render_words()
 
     def on_key(self, event: Key) -> None:
         """键盘操作逻辑拦截。"""
@@ -317,7 +332,7 @@ class WordsScreen(Screen):
         if key == "ctrl+f" or (key == "f" and not inp.has_focus):
             event.stop()
             self.starred_only = not self.starred_only
-            self.apply_filter()
+            self._do_search()
             self.render_words()
             return
 
@@ -385,14 +400,6 @@ class WordsScreen(Screen):
             [word.w or "", word.zh or "", word.core or "", word.en or "", word.c or ""]
         ).lower()
 
-    @staticmethod
-    def _score(entry: WordEntry, query: str) -> int:
-        return score_word_search(
-            entry.word.w,
-            entry.word.zh or "",
-            entry.search_text,
-            query
-        )
 
     @staticmethod
     def _mastery(word: Word) -> str:
@@ -407,20 +414,20 @@ class WordsScreen(Screen):
             return "记得"
         return "熟悉"
 
-    @staticmethod
-    def _detail_lines(word: Word) -> list[str]:
-        """返回全部详情行，支持纵向滚动。"""
+    def _detail_lines(self, word: Word, width: int) -> list[str]:
+        """返回全部详情行，支持自适应宽度折行与纵向滚动。"""
         lines = []
         star_lbl = r" \[已收藏\]" if word.is_starred else ""
-        lines.append(f"  {escape(word.w)}  /{escape(word.us or '-')}/{star_lbl}")
+        header_text = f"  {escape(word.w)}  /{escape(word.us or '-')}/{star_lbl}"
+        lines.extend(wrap_display(header_text, width=width, continuation_indent="  "))
         if word.core:
-            lines.append(f"  Core: {escape(word.core)}")
+            lines.extend(wrap_display(f"  [#6B7280]Core:[/] {escape(word.core)}", width=width, continuation_indent="        "))
         if word.zh:
-            lines.append(f"  CN:   {escape(word.zh)}")
+            lines.extend(wrap_display(f"  [#6B7280]CN:[/]   {escape(word.zh)}", width=width, continuation_indent="        "))
         if word.en:
-            lines.append(f"  EN:   {escape(word.en)}")
+            lines.extend(wrap_display(f"  [#6B7280]EN:[/]   {escape(word.en)}", width=width, continuation_indent="        "))
         if word.ex:
-            lines.append(f"  Ex:   {escape(word.ex)}")
+            lines.extend(wrap_display(f"  [#6B7280]Ex:[/]   {escape(word.ex)}", width=width, continuation_indent="        "))
         if word.exz:
-            lines.append(f"        {escape(word.exz)}")
+            lines.extend(wrap_display(f"        {escape(word.exz)}", width=width, continuation_indent="        "))
         return lines

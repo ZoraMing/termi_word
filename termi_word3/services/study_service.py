@@ -52,9 +52,12 @@ class StudyService:
             deck = repo.active_deck()
             if deck is None:
                 return StudyQueue(0, [], None)
+            setting = repo.get_settings()
+            scheduler = SchedulerService(timezone_offset_minutes=setting.timezone_offset_minutes)
+            session_date = scheduler.business_date()
 
             # 1. 尝试查找已存在的进行中会话 (断点恢复)
-            study_session = repo.open_session(deck.id)
+            study_session = repo.open_session(deck.id, session_date)
             if study_session is not None:
                 queue_ids = SessionQueueIds.from_json(study_session.remaining_card_ids)
                 cards = repo.cards_by_ids(list(queue_ids.ids))
@@ -62,7 +65,6 @@ class StudyService:
                 return StudyQueue(deck.id, cards, study_session.id, is_extra=is_extra)
 
             # 2. 如果不存在，则根据配置构建全新队列
-            setting = repo.get_settings()
             due_cards = repo.due_cards(deck.id, setting.review_soft_limit if mode != "new" else 0)
             new_cards = repo.new_cards(deck.id, setting.daily_new_target if mode != "review" else 0)
 
@@ -88,6 +90,7 @@ class StudyService:
             study_session = StudySession(
                 deck_id=deck.id,
                 session_type=f"extra_{mode}" if is_extra else mode,
+                session_date=session_date,
                 remaining_card_ids=SessionQueueIds(tuple(c.id for c in mixed_cards)).to_json(),
                 completed_count=0,
                 status=0,
@@ -105,8 +108,9 @@ class StudyService:
             if card is None:
                 return StudyActionResult(card_id=card_id, rating=rating, scheduled_days=0, msg="单词不存在")
 
-            # FSRS 调度计算并生成 ReviewLog
-            log = self.scheduler.review(card, rating)
+            setting = AppRepository(session).get_settings()
+            scheduler = SchedulerService(timezone_offset_minutes=setting.timezone_offset_minutes)
+            log = scheduler.review(card, rating)
             session.add(log)
 
             # 更新今天会话进度

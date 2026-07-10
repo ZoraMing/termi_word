@@ -60,8 +60,10 @@ class CalendarScreen(Screen):
             }
 
     def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
-        with self.app.session_factory() as session:
-            setting = AppRepository(session).get_settings()
+        setting = getattr(self.app, "settings", None)
+        if setting is None:
+            with self.app.session_factory() as session:
+                setting = AppRepository(session).get_settings()
         
         layout = compute_frame_layout(
             terminal_width=self.size.width,
@@ -101,15 +103,18 @@ class CalendarScreen(Screen):
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
 
+        today = date.today()
+        month_last_day = calendar.monthrange(today.year, today.month)[1]
+        month_start = date(today.year, today.month, 1)
+        month_end = date(today.year, today.month, month_last_day)
+
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             reviewed = repo.today_review_count()
             spelled = repo.today_spelling_count()
             streak = repo.streak_days()
-            active_dates = repo.activity_dates()
-            setting = repo.get_settings()
+            active_dates = repo.activity_dates_between(month_start, month_end)
 
-        today = date.today()
         weeks = calendar.monthcalendar(today.year, today.month)
 
         month_rows = []
@@ -133,31 +138,23 @@ class CalendarScreen(Screen):
 
         if self.editing:
             # 编辑模式: 标题 + 裁剪后的日历 + 字段配置行
-            lines = [f"Calendar / Editing  {today.year}-{today.month:02d}"]
+            lines = [f"日历 编辑  {today.year}-{today.month:02d}"]
             calendar_limit = max(1, content_height - len(self.fields) - 1)
             lines.extend(month_rows[:calendar_limit])
-            for index, (key, label) in enumerate(self.fields):
-                is_sel = index == self.selected
-                is_edit = is_sel
-                val = self.values[key]
-                lines.append(
-                    field_row(label, val, selected=is_sel, editing=is_edit, width=14)
-                )
+            lines.extend(self._plan_field_lines(editing=True))
             content_widget.update(render_content_block(lines, height=content_height, width=width))
         else:
             # 正常模式: 标题 + weekday + 裁剪后的日历 + 统计与目标值展示
             lines = [
-                f"Calendar / Browse  {today.year}-{today.month:02d}",
+                f"日历 浏览  {today.year}-{today.month:02d}",
                 "  Mo Tu We Th Fr Sa Su",
             ]
-            calendar_limit = max(1, content_height - 4)
+            calendar_limit = max(1, content_height - len(self.fields) - 4)
             lines.extend(month_rows[:calendar_limit])
             lines.append(
                 f"  今日打卡: 复习 {reviewed}  拼写 {spelled}  连续 {streak} 天"
             )
-            lines.append(
-                f"  当前目标: 新词 {setting.daily_new_target}  复习 {setting.review_soft_limit}  拼写 {setting.daily_spelling_target}"
-            )
+            lines.extend(self._plan_field_lines(editing=False))
             content_widget.update(render_content_block(lines, height=content_height, width=width))
 
         msg_widget.remove_class("success", "error", "muted")
@@ -272,8 +269,28 @@ class CalendarScreen(Screen):
     def _save_values(self) -> None:
         """同步并持久化配置更改到数据库。"""
         with self.app.session_factory() as session:
-            setting = AppRepository(session).get_settings()
+            repo = AppRepository(session)
+            setting = repo.get_settings()
             setting.daily_new_target = max(0, int(self.values["daily_new_target"]))
             setting.review_soft_limit = max(0, int(self.values["review_soft_limit"]))
             setting.daily_spelling_target = max(0, int(self.values["daily_spelling_target"]))
+            deck = repo.active_deck()
+            if deck is not None:
+                repo.close_open_sessions(deck.id)
             session.commit()
+
+    def _plan_field_lines(self, editing: bool) -> list[str]:
+        """返回每日学习计划字段行，保证光标选择始终可见。"""
+        lines = []
+        for index, (key, label) in enumerate(self.fields):
+            is_sel = index == self.selected
+            lines.append(
+                field_row(
+                    label,
+                    self.values[key],
+                    selected=is_sel,
+                    editing=editing and is_sel,
+                    width=14,
+                )
+            )
+        return lines

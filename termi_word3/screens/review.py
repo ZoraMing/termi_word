@@ -7,7 +7,7 @@ from textual.widgets import Static
 
 from termi_word3.database.models import Card
 from termi_word3.database.repositories import AppRepository
-from termi_word3.ui import TermiScreen
+from termi_word3.ui import TermiScreen, wrap_display, make_tui_progress_bar
 from termi_word3.ui.messages import format_study_action_result
 
 
@@ -28,6 +28,10 @@ class ReviewScreen(TermiScreen):
         self.content_scroll = 0
         self._has_extra_option = False
         self.is_extra = is_extra
+        self._waiting = False
+        self._auto_advance_worker = None
+        self._extra_study_worker = None
+        self._is_loading_extra = False
 
     def on_mount(self) -> None:
         self.render_card()
@@ -45,6 +49,22 @@ class ReviewScreen(TermiScreen):
 
         # 1. 队列完成状态
         if card is None:
+            if self._is_loading_extra:
+                lines = [
+                    "",
+                    "      正在加载额外学习队列...",
+                    "",
+                    "      请稍候。",
+                ]
+                self._has_extra_option = False
+                self.refresh_ui(
+                    header="复习 加载额外",
+                    lines=lines,
+                    message=self.feedback or "",
+                    footer="Esc 返回"
+                )
+                return
+
             # 检查是否有剩余新词或者未来要复习的卡片
             with self.app.session_factory() as session:
                 repo = AppRepository(session)
@@ -57,44 +77,45 @@ class ReviewScreen(TermiScreen):
             if deck and has_extra:
                 lines = [
                     "",
-                    "      今日计划学习队列已全部完成！",
+                    "      今日计划学习队列已完成。",
                     "",
                     "      按 Enter 键加载 20 个额外混合单词继续学习，",
-                    "      或按 Esc 键返回主界面。",
+                    "      或按 Esc 返回。",
                 ]
                 self._has_extra_option = True
                 self.refresh_ui(
-                    header="Review / Extra Option",
+                    header="复习 继续",
                     lines=lines,
                     message=self.feedback or "",
-                    footer="Enter 额外学习  Esc 返回首页"
+                    footer="Enter 额外学习  Esc 返回"
                 )
                 return
             else:
                 lines = [
                     "",
-                    "      恭喜你！今日计划的学习队列已全部完成。",
+                    "      今日计划学习队列已完成。",
                     "",
-                    "      请按 Esc 键返回主界面。",
+                    "      按 Esc 返回。",
                 ]
                 self._has_extra_option = False
                 self.refresh_ui(
-                    header="Review / Complete",
+                    header="复习 完成",
                     lines=lines,
                     message=self.feedback or "",
-                    footer="Esc 返回首页"
+                    footer="Esc 返回"
                 )
                 return
 
         word = card.word
-        progress = f"[{self.index + 1}/{len(self.cards)}]"
+        bar = make_tui_progress_bar(self.index + 1, len(self.cards))
+        progress = f"{bar} [{self.index + 1}/{len(self.cards)}]"
         star_flag = " *" if word.is_starred else ""
 
         # 2. 区分正面与背面
         if not self.is_revealed:
             # 正面：仅单词、音标、词性/分类
             us_str = f"/{word.us}/" if word.us else ""
-            title_tag = "Review / Extra Front" if self.is_extra else "Review / Front"
+            title_tag = "额外复习 正面" if self.is_extra else "复习 正面"
             lines = [
                 f"  {word.w}",
                 f"  {us_str}" if us_str else "",
@@ -107,29 +128,31 @@ class ReviewScreen(TermiScreen):
                 footer="Space 翻卡  1-4 评分  t 挂起  f 收藏  Esc 返回"
             )
         else:
-            # 背面：生成全部内容行，支持纵向滚动
-            us_str = f" /{word.us}/" if word.us else ""
-            all_lines = [
-                f"  {word.w}{us_str}  [{word.c or '-'}]",
-            ]
+            # 背面：生成全部内容行，支持自适应折行与纵向滚动
+            content_height, width = self.compute_dynamic_layout()
             
-            # 从 setting 加载展示开关
-            with self.app.session_factory() as session:
-                setting = AppRepository(session).get_settings()
+            us_str = f" /{word.us}/" if word.us else ""
+            header_text = f"  {word.w}{us_str}  [{word.c or '-'}]"
+            all_lines = []
+            all_lines.extend(wrap_display(header_text, width=width, continuation_indent="  "))
+            
+            # 从 app 缓存中加载展示开关，避免在渲染主循环中频繁访问 SQLite
+            setting = getattr(self.app, "settings", None)
+            if setting is None:
+                with self.app.session_factory() as session:
+                    setting = AppRepository(session).get_settings()
             
             if word.core:
-                all_lines.append(f"  Core: {word.core}")
+                all_lines.extend(wrap_display(f"  [#6B7280]Core:[/] {word.core}", width=width, continuation_indent="        "))
             if word.zh:
-                all_lines.append(f"  CN:   {word.zh}")
+                all_lines.extend(wrap_display(f"  [#6B7280]CN:[/]   {word.zh}", width=width, continuation_indent="        "))
             if setting.show_en and word.en:
-                all_lines.append(f"  EN:   {word.en}")
+                all_lines.extend(wrap_display(f"  [#6B7280]EN:[/]   {word.en}", width=width, continuation_indent="        "))
             if setting.show_examples and word.ex:
-                all_lines.append(f"  Ex:   {word.ex}")
+                all_lines.extend(wrap_display(f"  [#6B7280]Ex:[/]   {word.ex}", width=width, continuation_indent="        "))
             if setting.show_examples and word.exz:
-                all_lines.append(f"        {word.exz}")
+                all_lines.extend(wrap_display(f"        {word.exz}", width=width, continuation_indent="        "))
 
-            # 统一利用我们新写的基础 compute_dynamic_layout 得到可用视窗高度
-            content_height, _ = self.compute_dynamic_layout()
             # 纵向滚动：截取可见窗口（除去 header+横线 2 行）
             max_visible = max(2, content_height - 2)
             total = len(all_lines)
@@ -147,7 +170,7 @@ class ReviewScreen(TermiScreen):
             else:
                 visible = all_lines
 
-            title_tag = "Review / Extra Revealed" if self.is_extra else "Review / Revealed"
+            title_tag = "额外复习 背面" if self.is_extra else "复习 背面"
             
             rating_names = {1: "陌生", 2: "熟悉", 3: "记得", 4: "掌握"}
             if self.pending_rating is not None:
@@ -174,17 +197,7 @@ class ReviewScreen(TermiScreen):
         # 处于待确认额外学习选项状态下按 Enter
         if getattr(self, "_has_extra_option", False) and event.key == "enter":
             event.stop()
-            self._has_extra_option = False
-            # 调用 build_today_queue 此时会自动拉取额外词
-            queue = self.app.study_service.build_today_queue(mode="mixed")
-            self.cards = queue.cards
-            self.session_id = queue.session_id
-            self.index = 0
-            self.is_revealed = False
-            self.pending_action = None
-            self.is_extra = True
-            self.feedback = "已进入额外学习模式！"
-            self.render_card()
+            self.start_extra_study()
             return
 
         card = self.current_card
@@ -304,18 +317,95 @@ class ReviewScreen(TermiScreen):
         # s 跳过 (不经二阶段，直接即时切词)
         if key == "s":
             event.stop()
-            self.query_one("#message-area", Static).update("已跳过当前单词。")
-            self._waiting = True
-            self.content_scroll = 0
-            self.run_worker(self._auto_advance(immediate_ui_refresh=True))
+            self.start_auto_advance()
             return
+
+    def start_auto_advance(self) -> None:
+        """启动自动切词 worker，避免快速连按产生多个后台任务。"""
+        if self._waiting:
+            return
+        self._waiting = True
+        self.content_scroll = 0
+        if getattr(self, "is_mounted", True):
+            self.query_one("#message-area", Static).update("已跳过当前单词。")
+        self._auto_advance_worker = self.run_worker(
+            self._auto_advance(immediate_ui_refresh=True),
+            exclusive=True,
+        )
+        self._register_worker(self._auto_advance_worker)
+
+    def start_extra_study(self) -> None:
+        """后台构建额外学习队列，避免在键盘事件中同步访问数据库。"""
+        if self._extra_study_worker is not None or getattr(self, "_is_loading_extra", False):
+            return
+        self._has_extra_option = False
+        self._is_loading_extra = True
+        self.feedback = "正在加载额外学习队列..."
+        self.render_card()
+        self._extra_study_worker = self.run_worker(self._load_extra_study(), exclusive=True)
+        self._register_worker(self._extra_study_worker)
+
+    async def _load_extra_study(self) -> None:
+        """异步加载额外学习队列并刷新当前复习屏。"""
+        try:
+            queue = await asyncio.to_thread(self.app.study_service.build_today_queue, "mixed")
+            self.cards = queue.cards
+            self.session_id = queue.session_id
+            self.index = 0
+            self.is_revealed = False
+            self.pending_action = None
+            self.is_extra = True
+            self.feedback = "已进入额外学习模式。"
+        except asyncio.CancelledError:
+            self.feedback = "已取消加载额外学习。"
+            raise
+        except Exception as exc:
+            self.feedback = f"加载额外学习失败: {exc}"
+            self._has_extra_option = True
+        finally:
+            self._is_loading_extra = False
+            self._unregister_worker(self._extra_study_worker)
+            self._extra_study_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_card()
 
     async def _auto_advance(self, immediate_ui_refresh: bool = False) -> None:
         """延迟 1.0 秒（除非是跳过/挂起即时刷新）后进入下一词。"""
-        if not immediate_ui_refresh:
-            await asyncio.sleep(1.0)
-        self._waiting = False
-        self.index += 1
-        self.is_revealed = False
-        self.content_scroll = 0
-        self.render_card()
+        try:
+            if not immediate_ui_refresh:
+                await asyncio.sleep(1.0)
+            self.index += 1
+            self.is_revealed = False
+            self.content_scroll = 0
+            if getattr(self, "is_mounted", True):
+                self.render_card()
+        finally:
+            self._waiting = False
+            self._unregister_worker(self._auto_advance_worker)
+            self._auto_advance_worker = None
+
+    def on_unmount(self) -> None:
+        """屏幕卸载时取消仍在运行的后台 worker。"""
+        for attr in ("_auto_advance_worker", "_extra_study_worker"):
+            worker = getattr(self, attr, None)
+            if worker is not None:
+                worker.cancel()
+                self._unregister_worker(worker)
+                setattr(self, attr, None)
+        self._is_loading_extra = False
+
+    def _register_worker(self, worker) -> None:
+        try:
+            app = self.app
+        except Exception:
+            return
+        if hasattr(app, "register_worker"):
+            app.register_worker(worker)
+
+    def _unregister_worker(self, worker) -> None:
+        try:
+            app = self.app
+        except Exception:
+            return
+        if hasattr(app, "unregister_worker"):
+            app.unregister_worker(worker)

@@ -1,12 +1,15 @@
 """导入词表的预览与选择屏幕"""
 from __future__ import annotations
 
+import asyncio
+
 from textual.app import ComposeResult
 from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Static
 
 from termi_word3.services.import_service import ImportRow
+from termi_word3.domain.results import ImportResult
 from termi_word3.ui import clamp_scroll_offset, panel_body_height, panel_height, panel_width, scroll_window, text_panel, truncate_display
 from termi_word3.ui.messages import format_import_result
 
@@ -26,6 +29,8 @@ class ImportScreen(Screen):
         self.selected = 0
         self.row_offset = 0
         self.message = ""
+        self._import_worker = None
+        self._is_importing = False
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
@@ -86,9 +91,61 @@ class ImportScreen(Screen):
         self.render_panel()
 
     def import_rows(self) -> None:
-        result = self.app.import_service.import_rows(self.deck_name, self.skip_rows)
-        self.message = format_import_result(result)
+        if self._is_importing:
+            return
+        self._is_importing = True
+        self.message = "正在导入词表..."
         self.render_panel()
+        self._import_worker = self.run_worker(self._import_rows_async(), exclusive=True)
+        self._register_worker(self._import_worker)
+
+    async def _import_rows_async(self) -> None:
+        """在 worker 中执行导入，避免阻塞 UI 主线程。"""
+        try:
+            skip_rows = set(self.skip_rows)
+            csv_to_use, rows, missing = await asyncio.to_thread(
+                self.app.import_service.read_source_rows,
+                self.deck_name,
+            )
+            if not csv_to_use.exists():
+                result = ImportResult(source_missing=str(csv_to_use))
+            elif missing:
+                result = ImportResult(missing_fields=missing)
+            else:
+                result = await self._import_rows_in_batches(rows, skip_rows)
+            self.message = format_import_result(result)
+        except asyncio.CancelledError:
+            self.message = "导入已取消。"
+            raise
+        except Exception as exc:
+            self.message = f"导入失败（系统异常）: {exc}"
+        finally:
+            self._is_importing = False
+            self._unregister_worker(self._import_worker)
+            self._import_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_panel()
+
+    async def _import_rows_in_batches(self, rows: list[ImportRow], skip_rows: set[int]):
+        """按批写入数据库，让取消最多等待当前批次完成。"""
+        imported = 0
+        updated = 0
+        skipped = 0
+        batch_size = self.app.import_service.BATCH_SIZE
+        for start in range(0, len(rows), batch_size):
+            await asyncio.sleep(0)
+            batch = rows[start:start + batch_size]
+            partial = await asyncio.to_thread(
+                self.app.import_service.import_prepared_rows,
+                self.deck_name,
+                batch,
+                skip_rows,
+            )
+            imported += partial.imported
+            updated += partial.updated
+            skipped += partial.skipped
+
+        return ImportResult(imported=imported, updated=updated, skipped=skipped)
 
     def visible_row_count(self) -> int:
         return max(1, panel_body_height(self.panel_height()) - 4)
@@ -123,6 +180,8 @@ class ImportScreen(Screen):
         height = self.panel_height()
         width = self.content_width()
         footer = "↑↓ 选择  Space 跳过/恢复  Enter 导入  Esc 返回"
+        if self._is_importing:
+            footer = "正在导入  Esc 返回"
         if self.missing_fields:
             lines = [
                 f"词书      {self.deck_name}",
@@ -148,7 +207,34 @@ class ImportScreen(Screen):
         self.query_one("#content-area", Static).update(text_panel("导入词表", lines, footer, height, width=width))
 
     def action_back(self) -> None:
+        self.cancel_import_worker()
         self.app.pop_screen()
+
+    def on_unmount(self) -> None:
+        self.cancel_import_worker()
+
+    def cancel_import_worker(self) -> None:
+        """取消仍在运行的导入 worker。"""
+        if self._import_worker is not None:
+            self._import_worker.cancel()
+            self._unregister_worker(self._import_worker)
+            self._import_worker = None
+
+    def _register_worker(self, worker) -> None:
+        try:
+            app = self.app
+        except Exception:
+            return
+        if hasattr(app, "register_worker"):
+            app.register_worker(worker)
+
+    def _unregister_worker(self, worker) -> None:
+        try:
+            app = self.app
+        except Exception:
+            return
+        if hasattr(app, "unregister_worker"):
+            app.unregister_worker(worker)
 
     def content_width(self) -> int:
         return panel_width(self.size.width, 68)

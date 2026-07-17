@@ -51,7 +51,9 @@ class TestAppLifecycle(unittest.TestCase):
 
         app._bootstrap_worker = first_worker
         app._study_worker = second_worker
-        app.session_factory = FakeSessionFactory(engine)
+        app._engine = engine
+        app._managed_workers = []
+        app._is_exiting = False
         app.exit = lambda: exited.append(True)
 
         app.request_exit()
@@ -69,7 +71,9 @@ class TestAppLifecycle(unittest.TestCase):
 
         app._bootstrap_worker = worker
         app._study_worker = None
-        app.session_factory = FakeSessionFactory(engine)
+        app._engine = engine
+        app._managed_workers = []
+        app._is_exiting = False
         app.exit = lambda: exited.append(True)
 
         app.request_exit()
@@ -87,8 +91,9 @@ class TestAppLifecycle(unittest.TestCase):
 
         app._bootstrap_worker = None
         app._study_worker = None
+        app._engine = engine
         app._managed_workers = []
-        app.session_factory = FakeSessionFactory(engine)
+        app._is_exiting = False
         app.exit = lambda: exited.append(True)
 
         app.register_worker(screen_worker)
@@ -148,7 +153,7 @@ class TestReviewLifecycle(unittest.TestCase):
         screen._auto_advance_worker = worker
         screen.run_worker = self.record_worker(calls, worker)
 
-        screen.start_auto_advance()
+        screen._do_auto_advance()
 
         self.assertEqual(calls, [])
         self.assertIs(screen._auto_advance_worker, worker)
@@ -169,12 +174,13 @@ class TestReviewLifecycle(unittest.TestCase):
         calls: list[object] = []
 
         screen._extra_study_worker = None
+        screen._is_loading_extra = False
         screen._has_extra_option = True
         screen.feedback = ""
         screen.render_card = lambda: None
         screen.run_worker = self.record_worker(calls, worker)
 
-        screen.start_extra_study()
+        screen._start_extra_study()
 
         self.assertFalse(screen._has_extra_option)
         self.assertEqual(screen.feedback, "正在加载额外学习队列...")
@@ -190,7 +196,7 @@ class TestReviewLifecycle(unittest.TestCase):
         screen._extra_study_worker = worker
         screen.run_worker = self.record_worker(calls, worker)
 
-        screen.start_extra_study()
+        screen._start_extra_study()
 
         self.assertEqual(calls, [])
         self.assertIs(screen._extra_study_worker, worker)

@@ -12,7 +12,7 @@ from termi_word.services.home_shortcut_service import (
     format_home_menu,
     home_shortcuts_from_setting,
 )
-from termi_word.ui import is_footer_visible, render_content_block, render_footer, rule, toggle_footer_visible
+from termi_word.ui import display_width, is_footer_visible, render_content_block, render_footer, rule, toggle_footer_visible
 from termi_word.ui.layout import compute_frame_layout
 
 
@@ -134,9 +134,9 @@ class TodayScreen(Screen):
             remaining = repo.remaining_new_count(deck.id) if deck else 0
 
         # 精确格式化核心静态字符画，自适应宽度
-        title_fill = " " * max(1, width - len("Termi Word") - len("?键展示收起") - 2)
+        title_fill = " " * max(1, width - display_width("Termi Word") - display_width("? 展示帮助") - 2)
         lines = [
-            f"Termi Word{title_fill}?键展示收起",
+            f"Termi Word{title_fill}? 展示帮助",
             rule(width=width),
             f"当前词本：{deck_name:<10}  总词数：{total:<6}",
             f"每轮配置：新词 {setting.daily_new_target:<3} 复习 {setting.review_soft_limit:<3}   今日计划：拼写 {setting.daily_spelling_target:<3}",

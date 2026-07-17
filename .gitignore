@@ -2,3 +2,17 @@ __pycache__
 .*
 
 tmp/
+build/
+dist/
+*.build/
+*.dist/
+*.onefile-build/
+
+# Local databases
+*.db
+*.sqlite3
+
+# Logs and config files
+*.log
+ui_config.json
+local_time.json

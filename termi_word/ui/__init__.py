@@ -412,3 +412,23 @@ def make_tui_progress_bar(current: int, total: int, width: int = 6) -> str:
     active = int(ratio * width)
     inactive = width - active
     return f"[#4ADE80]{'█' * active}[/][#4b5563]{'░' * inactive}[/]"
+
+
+def safe_register_worker(screen: object, worker: object) -> None:
+    """安全登记需要在应用退出时统一取消的后台 worker，防止测试或未挂载时抛异常。"""
+    try:
+        app = screen.app
+        if app is not None and hasattr(app, "register_worker"):
+            app.register_worker(worker)
+    except (Exception, LookupError, AttributeError):
+        pass
+
+
+def safe_unregister_worker(screen: object, worker: object) -> None:
+    """安全注销已结束或已取消的后台 worker。"""
+    try:
+        app = screen.app
+        if app is not None and hasattr(app, "unregister_worker"):
+            app.unregister_worker(worker)
+    except (Exception, LookupError, AttributeError):
+        pass

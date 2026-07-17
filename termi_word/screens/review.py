@@ -7,7 +7,7 @@ from textual.widgets import Static
 
 from termi_word.database.models import Card
 from termi_word.database.repositories import AppRepository
-from termi_word.ui import TermiScreen, wrap_display, make_tui_progress_bar
+from termi_word.ui import TermiScreen, wrap_display, make_tui_progress_bar, safe_register_worker, safe_unregister_worker
 from termi_word.ui.messages import format_study_action_result
 
 
@@ -32,6 +32,8 @@ class ReviewScreen(TermiScreen):
         self._auto_advance_worker = None
         self._extra_study_worker = None
         self._is_loading_extra = False
+        self.is_busy = False
+        self._rate_worker = None
 
     def on_mount(self) -> None:
         self.render_card()
@@ -117,7 +119,7 @@ class ReviewScreen(TermiScreen):
             us_str = f"/{word.us}/" if word.us else ""
             title_tag = "额外复习 正面" if self.is_extra else "复习 正面"
             lines = [
-                f"  {word.w}",
+                f"  [#F59E0B]{word.w}[/]",
                 f"  {us_str}" if us_str else "",
                 f"  [{word.c or '-'}]",
             ]
@@ -133,7 +135,7 @@ class ReviewScreen(TermiScreen):
             content_height, width = self.compute_dynamic_layout()
             
             us_str = f" /{word.us}/" if word.us else ""
-            header_text = f"  {word.w}{us_str}  [{word.c or '-'}]"
+            header_text = f"  [#F59E0B]{word.w}[/]{us_str}  [{word.c or '-'}]"
             all_lines = []
             all_lines.extend(wrap_display(header_text, width=width, continuation_indent="  "))
             
@@ -195,6 +197,10 @@ class ReviewScreen(TermiScreen):
             self.app.open_search()
             return
 
+        if self.is_busy:
+            event.stop()
+            return
+
         if event.key in ("question_mark", "?"):
             event.stop()
             self.toggle_footer()
@@ -204,7 +210,7 @@ class ReviewScreen(TermiScreen):
         # 处于待确认额外学习选项状态下按 Enter
         if getattr(self, "_has_extra_option", False) and event.key == "enter":
             event.stop()
-            self.start_extra_study()
+            self._start_extra_study()
             return
 
         card = self.current_card
@@ -223,13 +229,9 @@ class ReviewScreen(TermiScreen):
                 action = self.pending_action.action
                 self.pending_action = None
                 if action == "suspend_word":
-                    self.app.study_service.suspend_word(self.session_id, card.word.id)
-                    self.feedback = "已挂起此单词。后续将不再调度复习。"
-                    self.index += 1
-                    self.is_revealed = False
-                    self.pending_rating = None
-                    self.content_scroll = 0
-                self.render_card()
+                    self._do_suspend_word(card)
+                else:
+                    self.render_card()
                 return
             elif event.key == self.pending_action.cancel_key:
                 event.stop()
@@ -247,10 +249,6 @@ class ReviewScreen(TermiScreen):
             event.stop()
             self.app.pop_screen()
             return
-
-
-
-
 
         key = event.key
 
@@ -277,14 +275,7 @@ class ReviewScreen(TermiScreen):
                 return
             
             if self.pending_rating is not None:
-                # 确认当前的评分，持久化并切换单词
-                result = self.app.study_service.rate_card(self.session_id, card.id, self.pending_rating)
-                self.feedback = f"已记录！{format_study_action_result(result)}"
-                self.index += 1
-                self.is_revealed = False
-                self.pending_rating = None
-                self.content_scroll = 0
-                self.render_card()
+                self._do_rate_card(self.pending_rating)
             return
 
         # 1-4 评分（正面初评翻卡，背面修改评分，此时均不存盘）
@@ -299,9 +290,7 @@ class ReviewScreen(TermiScreen):
         # f 收藏
         if key == "f":
             event.stop()
-            starred = self.app.study_service.toggle_star(card.word.id)
-            self.feedback = "已收藏此单词，将在右上角标记 *。" if starred else "已取消收藏该单词。"
-            self.render_card()
+            self._do_toggle_star(card.word.id)
             return
 
         # t 挂起 (需二次确认)
@@ -319,11 +308,13 @@ class ReviewScreen(TermiScreen):
         # s 跳过 (不经二阶段，直接即时切词)
         if key == "s":
             event.stop()
-            self.start_auto_advance()
+            self._do_auto_advance()
             return
 
-    def start_auto_advance(self) -> None:
-        """启动自动切词 worker，避免快速连按产生多个后台任务。"""
+    # ── 异步操作 ──────────────────────────────────────────────
+
+    def _do_auto_advance(self) -> None:
+        """跳过当前单词，即时切词。"""
         if self._waiting:
             return
         self._waiting = True
@@ -331,23 +322,53 @@ class ReviewScreen(TermiScreen):
         if getattr(self, "is_mounted", True):
             self.query_one("#message-area", Static).update("已跳过当前单词。")
         self._auto_advance_worker = self.run_worker(
-            self._auto_advance(immediate_ui_refresh=True),
+            self._async_auto_advance(immediate_ui_refresh=True),
             exclusive=True,
         )
-        self._register_worker(self._auto_advance_worker)
+        safe_register_worker(self, self._auto_advance_worker)
 
-    def start_extra_study(self) -> None:
-        """后台构建额外学习队列，避免在键盘事件中同步访问数据库。"""
-        if self._extra_study_worker is not None or getattr(self, "_is_loading_extra", False):
+    def _start_extra_study(self) -> None:
+        """后台构建额外学习队列。"""
+        if self._extra_study_worker is not None or self._is_loading_extra:
             return
         self._has_extra_option = False
         self._is_loading_extra = True
         self.feedback = "正在加载额外学习队列..."
         self.render_card()
-        self._extra_study_worker = self.run_worker(self._load_extra_study(), exclusive=True)
-        self._register_worker(self._extra_study_worker)
+        self._extra_study_worker = self.run_worker(self._async_load_extra_study(), exclusive=True)
+        safe_register_worker(self, self._extra_study_worker)
 
-    async def _load_extra_study(self) -> None:
+    def _do_rate_card(self, rating: int) -> None:
+        """异步保存评分。"""
+        if self.is_busy or self.current_card is None:
+            return
+        self.is_busy = True
+        self.feedback = "正在保存评分..."
+        self.render_card()
+        self._rate_worker = self.run_worker(self._async_rate_card(rating), exclusive=True)
+        safe_register_worker(self, self._rate_worker)
+
+    def _do_suspend_word(self, card) -> None:
+        """异步保存挂起状态。"""
+        if self.is_busy:
+            return
+        self.is_busy = True
+        self.feedback = "正在保存挂起状态..."
+        self.render_card()
+        self._rate_worker = self.run_worker(self._async_suspend_word(card), exclusive=True)
+        safe_register_worker(self, self._rate_worker)
+
+    def _do_toggle_star(self, word_id: int) -> None:
+        """异步保存收藏状态。"""
+        if self.is_busy:
+            return
+        self.is_busy = True
+        self.feedback = "正在保存收藏状态..."
+        self.render_card()
+        self._rate_worker = self.run_worker(self._async_toggle_star(word_id), exclusive=True)
+        safe_register_worker(self, self._rate_worker)
+
+    async def _async_load_extra_study(self) -> None:
         """异步加载额外学习队列并刷新当前复习屏。"""
         try:
             queue = await asyncio.to_thread(self.app.study_service.build_today_queue, "mixed")
@@ -366,12 +387,12 @@ class ReviewScreen(TermiScreen):
             self._has_extra_option = True
         finally:
             self._is_loading_extra = False
-            self._unregister_worker(self._extra_study_worker)
+            safe_unregister_worker(self, self._extra_study_worker)
             self._extra_study_worker = None
             if getattr(self, "is_mounted", True):
                 self.render_card()
 
-    async def _auto_advance(self, immediate_ui_refresh: bool = False) -> None:
+    async def _async_auto_advance(self, immediate_ui_refresh: bool = False) -> None:
         """延迟 1.0 秒（除非是跳过/挂起即时刷新）后进入下一词。"""
         try:
             if not immediate_ui_refresh:
@@ -383,31 +404,66 @@ class ReviewScreen(TermiScreen):
                 self.render_card()
         finally:
             self._waiting = False
-            self._unregister_worker(self._auto_advance_worker)
+            safe_unregister_worker(self, self._auto_advance_worker)
             self._auto_advance_worker = None
+
+    async def _async_rate_card(self, rating: int) -> None:
+        card = self.current_card
+        try:
+            result = await asyncio.to_thread(
+                self.app.study_service.rate_card, self.session_id, card.id, rating
+            )
+            self.feedback = f"已记录！{format_study_action_result(result)}"
+            self.index += 1
+            self.is_revealed = False
+            self.pending_rating = None
+            self.content_scroll = 0
+        except Exception as exc:
+            self.feedback = f"保存评分失败: {exc}"
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._rate_worker)
+            self._rate_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_card()
+
+    async def _async_suspend_word(self, card) -> None:
+        try:
+            await asyncio.to_thread(
+                self.app.study_service.suspend_word, self.session_id, card.word.id
+            )
+            self.feedback = "已挂起此单词。后续将不再调度复习。"
+            self.index += 1
+            self.is_revealed = False
+            self.pending_rating = None
+            self.content_scroll = 0
+        except Exception as exc:
+            self.feedback = f"挂起保存失败: {exc}"
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._rate_worker)
+            self._rate_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_card()
+
+    async def _async_toggle_star(self, word_id: int) -> None:
+        try:
+            starred = await asyncio.to_thread(self.app.study_service.toggle_star, word_id)
+            self.feedback = "已收藏此单词，将在右上角标记 *。" if starred else "已取消收藏该单词。"
+        except Exception as exc:
+            self.feedback = f"收藏保存失败: {exc}"
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._rate_worker)
+            self._rate_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_card()
 
     def on_unmount(self) -> None:
         """屏幕卸载时取消仍在运行的后台 worker。"""
-        for attr in ("_auto_advance_worker", "_extra_study_worker"):
+        for attr in ("_auto_advance_worker", "_extra_study_worker", "_rate_worker"):
             worker = getattr(self, attr, None)
             if worker is not None:
                 worker.cancel()
-                self._unregister_worker(worker)
                 setattr(self, attr, None)
         self._is_loading_extra = False
-
-    def _register_worker(self, worker) -> None:
-        try:
-            app = self.app
-        except Exception:
-            return
-        if hasattr(app, "register_worker"):
-            app.register_worker(worker)
-
-    def _unregister_worker(self, worker) -> None:
-        try:
-            app = self.app
-        except Exception:
-            return
-        if hasattr(app, "unregister_worker"):
-            app.unregister_worker(worker)

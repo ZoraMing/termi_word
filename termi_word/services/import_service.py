@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 
-from termi_word.config import DEFAULT_CSV_PATH, DATA_DIR
 from termi_word.database.repositories import AppRepository
 from termi_word.domain.results import ImportResult
 
@@ -28,11 +27,18 @@ class ImportService:
 
     def __init__(self, session_factory: sessionmaker, csv_path: Path | None = None) -> None:
         self.session_factory = session_factory
-        self.csv_path = csv_path or DEFAULT_CSV_PATH
+        self._csv_path = csv_path
+
+    @property
+    def csv_path(self) -> Path:
+        if self._csv_path is not None:
+            return self._csv_path
+        from termi_word.config import DEFAULT_CSV_PATH
+        return DEFAULT_CSV_PATH
 
     def available_decks(self) -> list[str]:
-        """获取 data 目录下所有可用的词书（CSV 文件名，不含扩展名）。"""
-        data_dir = Path(self.csv_path).parent if isinstance(self.csv_path, Path) else DATA_DIR
+        """获取导入目录下所有可用的词书（CSV 文件名，不含扩展名）。"""
+        data_dir = Path(self.csv_path).parent
         if not data_dir.exists():
             return []
         decks = []
@@ -89,20 +95,23 @@ class ImportService:
         return csv_to_use, rows, ()
 
     def ensure_initial_data(self) -> None:
-        """检查数据库，扫描 data 目录下所有 CSV，并将未导入的词书全部自动导入一遍。"""
+        """检查数据库，扫描导入目录下所有 CSV，并将未导入的词书自动导入。"""
         decks = self.available_decks()
-        with self.session_factory() as session:
-            repo = AppRepository(session)
-            for deck_name in decks:
+        data_dir = Path(self.csv_path).parent
+        for deck_name in decks:
+            with self.session_factory() as session:
+                repo = AppRepository(session)
                 deck = repo.get_or_create_deck(deck_name)
-                # 如果这个词本的单词数是 0，说明从未导入，则执行同步
-                if repo.word_count(deck.id) == 0:
-                    csv_file = DATA_DIR / f"{deck_name}.csv"
-                    if csv_file.exists():
-                        try:
-                            self.import_from_csv(csv_file, deck_name)
-                        except Exception:
-                            pass
+                should_import = repo.word_count(deck.id) == 0
+                session.commit()
+            # 如果这个词本的单词数是 0，说明从未导入，则执行同步
+            if should_import:
+                csv_file = data_dir / f"{deck_name}.csv"
+                if csv_file.exists():
+                    try:
+                        self.import_from_csv(csv_file, deck_name)
+                    except Exception:
+                        pass
 
     def import_from_csv(self, path: Path | str, deck_name: str) -> int:
         """从 CSV 读入，并持久化到指定的词本中。返回成功导入的单词数量。"""
@@ -114,7 +123,7 @@ class ImportService:
             repo = AppRepository(session)
             deck = repo.get_or_create_deck(deck_name)
             try:
-                with path.open("r", encoding="utf-8") as file:
+                with path.open("r", encoding="utf-8-sig") as file:
                     reader = csv.DictReader(file)
                     for row in reader:
                         word = repo.add_word_if_missing(deck, row)

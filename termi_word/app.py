@@ -12,6 +12,7 @@ from textual.widgets import Static
 
 from termi_word.config import APP_TITLE, DEFAULT_DB_PATH
 from termi_word.database.engine import create_session_factory, init_database
+from termi_word.runtime_paths import RUNTIME_PATHS, ensure_data_directories
 from termi_word.screens.calendar import CalendarScreen
 
 from termi_word.screens.review import ReviewScreen
@@ -43,7 +44,11 @@ class TermiWordApp(App):
 
     def __init__(self) -> None:
         super().__init__()
+        ensure_data_directories(RUNTIME_PATHS)
+        self._engine = None  # 显式存储引擎引用，便于生命周期管理
         self.session_factory = create_session_factory(DEFAULT_DB_PATH)
+        # 保存引擎引用
+        self._engine = self.session_factory.kw.get("bind")
         self.import_service = ImportService(self.session_factory)
         self.study_service = StudyService(self.session_factory)
         self.spelling_service = SpellingService(self.session_factory)
@@ -155,9 +160,10 @@ class TermiWordApp(App):
         if hasattr(self, "_managed_workers"):
             self._managed_workers.clear()
 
-        engine = getattr(self.session_factory, "kw", {}).get("bind")
-        if engine is not None:
-            engine.dispose()
+        # 使用显式存储的引擎引用，避免依赖 SQLAlchemy 内部实现
+        if self._engine is not None:
+            self._engine.dispose()
+            self._engine = None
 
         self.exit()
 
@@ -191,6 +197,42 @@ class TermiWordApp(App):
                 show_examples=getattr(setting, "show_examples", True),
             )
             self._search_shortcut = self.settings.search_shortcut
+
+    def reload_database_and_services(self) -> None:
+        """热更新数据库路径，重新创建连接池及所有关联服务。"""
+        from termi_word.runtime_paths import RUNTIME_PATHS, ensure_data_directories
+        from termi_word.database.engine import create_session_factory, init_database
+        from termi_word.config import DEFAULT_DB_PATH
+
+        # 1. 确保新路径的物理目录存在
+        ensure_data_directories(RUNTIME_PATHS)
+
+        # 2. 关闭并释放旧的数据库连接引擎
+        if self._engine is not None:
+            self._engine.dispose()
+            self._engine = None
+
+        # 3. 根据最新的 DEFAULT_DB_PATH 重新创建 session_factory
+        self.session_factory = create_session_factory(DEFAULT_DB_PATH)
+        self._engine = self.session_factory.kw.get("bind")
+
+        # 4. 更新相关服务绑定的 session_factory
+        self.import_service.session_factory = self.session_factory
+        self.study_service.session_factory = self.session_factory
+        self.spelling_service.session_factory = self.session_factory
+
+        # 5. 初始化新库并创建表结构，确保生成必要基础数据
+        init_database(self.session_factory)
+        self._ensure_local_time_settings()
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(asyncio.to_thread(self.import_service.ensure_initial_data))
+        except RuntimeError:
+            self.import_service.ensure_initial_data()
+
+        # 6. 刷新当前缓存的系统设置
+        self.refresh_settings_cache()
 
     def _ensure_local_time_settings(self) -> None:
         """启动时校验一次系统时区，并把结果写入本地配置和数据库默认值。"""

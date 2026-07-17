@@ -1,6 +1,7 @@
 """词表展示与搜索屏幕。"""
 from __future__ import annotations
 
+import asyncio
 import random
 from dataclasses import dataclass
 from datetime import date
@@ -21,6 +22,8 @@ from termi_word.ui import (
     rule,
     toggle_footer_visible,
     wrap_display,
+    safe_register_worker,
+    safe_unregister_worker,
 )
 from termi_word.ui.layout import compute_frame_layout
 
@@ -73,6 +76,8 @@ class WordsScreen(Screen):
         self.results: list[WordEntry] = []
         self.total_count: int = 0
         self._search_timer = None
+        self.is_busy = False
+        self._search_worker = None
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
@@ -84,13 +89,43 @@ class WordsScreen(Screen):
             yield Static(id="footer-area")
 
     def on_mount(self) -> None:
+        self.results = []
+        self.total_count = 0
         self._do_search()
-        self.render_words()
         if self.focus_search_on_mount:
             self.focus_search_input()
 
     def _do_search(self) -> None:
-        """从数据库查询当前搜索条件下的单词列表，替代全量内存缓存。"""
+        """发起异步搜索，取消上一个未完成的搜索 worker。"""
+        if self._search_worker is not None:
+            self._search_worker.cancel()
+            self._search_worker = None
+        
+        self.is_busy = True
+        self.render_words()
+        self._search_worker = self.run_worker(self._async_search(), exclusive=True)
+        safe_register_worker(self, self._search_worker)
+
+    async def _async_search(self) -> None:
+        try:
+            results, total_count = await asyncio.to_thread(self._query_and_score)
+            self.results = results
+            self.total_count = total_count
+            self.selected = min(self.selected, max(0, len(self.results) - 1))
+            self.list_offset = min(self.list_offset, self.selected)
+        except Exception as exc:
+            self.results = []
+            self.total_count = 0
+            self.log.warning(f"检索单词失败: {exc}")
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._search_worker)
+            self._search_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_words()
+
+    def _query_and_score(self) -> tuple[list[WordEntry], int]:
+        """纯计算与数据库拉取，可在后台线程运行"""
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             words = repo.search_words(
@@ -99,32 +134,30 @@ class WordsScreen(Screen):
                 limit=200,
                 starred_only=self.starred_only,
             )
-            self.total_count = repo.word_count(self.deck_id)
-
-        # 对 DB 粗筛结果做应用层精排
-        query = self.search_query.strip().lower()
-        if query:
-            scored = [
-                (score_word_search(w.w, w.zh or "", self._search_text(w), query), w)
-                for w in words
-            ]
-            scored.sort(key=lambda x: x[0], reverse=True)
-            self.results = [
-                WordEntry(word=w, search_text=self._search_text(w), status=self._mastery(w))
-                for s, w in scored if s > 0
-            ]
-        else:
-            # 无搜索词时，用日期种子 shuffle（保证同一天乱序一致）
-            seed = int(date.today().strftime("%Y%m%d"))
-            random.Random(seed).shuffle(words)
-            self.results = [
-                WordEntry(word=w, search_text=self._search_text(w), status=self._mastery(w))
-                for w in words
-            ]
-
-        # 重调选中项索引范围防止越界
-        self.selected = min(self.selected, max(0, len(self.results) - 1))
-        self.list_offset = min(self.list_offset, self.selected)
+            
+            results = []
+            query = self.search_query.strip().lower()
+            if query:
+                scored = [
+                    (score_word_search(w.w, w.zh or "", self._search_text(w), query), w)
+                    for w in words
+                ]
+                scored.sort(key=lambda x: x[0], reverse=True)
+                for s, w in scored:
+                    if s > 0:
+                        _ = w.deck.name if w.deck else None
+                        _ = w.card
+                        results.append(WordEntry(word=w, search_text=self._search_text(w), status=self._mastery(w)))
+            else:
+                seed = int(date.today().strftime("%Y%m%d"))
+                random.Random(seed).shuffle(words)
+                for w in words:
+                    _ = w.deck.name if w.deck else None
+                    _ = w.card
+                    results.append(WordEntry(word=w, search_text=self._search_text(w), status=self._mastery(w)))
+            
+            total_count = repo.word_count(self.deck_id)
+            return results, total_count
 
     def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
         setting = getattr(self.app, "settings", None)
@@ -223,7 +256,9 @@ class WordsScreen(Screen):
             else:
                 lines.append(line_content)
 
-        if not visible:
+        if self.is_busy:
+            lines.append("  正在检索词库，请稍候...")
+        elif not visible:
             lines.append("  无匹配单词结果")
 
         while len(lines) < list_limit:
@@ -258,10 +293,14 @@ class WordsScreen(Screen):
         # 刷新状态消息区
         msg_widget.remove_class("success", "error", "muted")
         
-        if self_focus:
+        if self.is_busy:
+            msg_widget.add_class("muted")
+            focus_status = "正在检索中 | "
+            detail_tip = "请稍等..."
+        elif self_focus:
             msg_widget.add_class("muted")
             focus_status = "输入搜索中 | "
-            detail_tip = "按 Enter 搜索"
+            detail_tip = "按 Enter 锁定详情"
         else:
             if self.detail_selected:
                 msg_widget.add_class("success")
@@ -301,7 +340,6 @@ class WordsScreen(Screen):
         """防抖定时器触发后执行实际搜索。"""
         self._search_timer = None
         self._do_search()
-        self.render_words()
 
     def on_key(self, event: Key) -> None:
         """键盘操作逻辑拦截。"""
@@ -309,6 +347,10 @@ class WordsScreen(Screen):
         if self.app.is_search_shortcut(event.key):
             event.stop()
             self.app.open_search()
+            return
+
+        if self.is_busy:
+            event.stop()
             return
 
         if event.key in ("question_mark", "?"):
@@ -340,7 +382,6 @@ class WordsScreen(Screen):
             event.stop()
             self.starred_only = not self.starred_only
             self._do_search()
-            self.render_words()
             return
 
         # 3. 向上：列表选择（未锁定） or 详情纵向滚动（已锁定）
@@ -438,3 +479,8 @@ class WordsScreen(Screen):
         if word.exz:
             lines.extend(wrap_display(f"        {escape(word.exz)}", width=width, continuation_indent="        "))
         return lines
+
+    def on_unmount(self) -> None:
+        if self._search_worker is not None:
+            self._search_worker.cancel()
+            self._search_worker = None

@@ -8,10 +8,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from termi_word.config import DATA_DIR
-
-
-LOCAL_TIME_CONFIG_PATH = DATA_DIR / "local_time.json"
 _OFFSET_RE = re.compile(r"^([+-])(\d{2}):(\d{2})$")
 
 
@@ -59,11 +55,18 @@ class TimeSettingsService:
 
     def __init__(
         self,
-        config_path: Path = LOCAL_TIME_CONFIG_PATH,
+        config_path: Path | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
-        self.config_path = config_path
+        self._config_path = config_path
         self.now = now or (lambda: datetime.now().astimezone())
+
+    @property
+    def config_path(self) -> Path:
+        if self._config_path is not None:
+            return self._config_path
+        from termi_word.config import LOCAL_TIME_CONFIG_PATH
+        return LOCAL_TIME_CONFIG_PATH
 
     def ensure_config(self) -> LocalTimeConfig:
         """确保本地时区配置存在；已存在时不覆盖用户修改。"""

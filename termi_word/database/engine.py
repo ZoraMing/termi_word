@@ -13,7 +13,7 @@ def create_session_factory(db_path: str | Path) -> sessionmaker:
     """创建 SQLAlchemy 会话工厂，启用外键约束和 WAL 模式。"""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"sqlite:///{db_path}", echo=False)
+    engine = create_engine(f"sqlite:///{db_path}", echo=False, connect_args={"timeout": 15.0})
 
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record) -> None:

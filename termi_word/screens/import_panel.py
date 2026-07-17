@@ -10,7 +10,17 @@ from textual.widgets import Static
 
 from termi_word.services.import_service import ImportRow
 from termi_word.domain.results import ImportResult
-from termi_word.ui import clamp_scroll_offset, panel_body_height, panel_height, panel_width, scroll_window, text_panel, truncate_display
+from termi_word.ui import (
+    clamp_scroll_offset,
+    panel_body_height,
+    panel_height,
+    panel_width,
+    scroll_window,
+    text_panel,
+    truncate_display,
+    safe_register_worker,
+    safe_unregister_worker,
+)
 from termi_word.ui.messages import format_import_result
 
 
@@ -97,7 +107,7 @@ class ImportScreen(Screen):
         self.message = "正在导入词表..."
         self.render_panel()
         self._import_worker = self.run_worker(self._import_rows_async(), exclusive=True)
-        self._register_worker(self._import_worker)
+        safe_register_worker(self, self._import_worker)
 
     async def _import_rows_async(self) -> None:
         """在 worker 中执行导入，避免阻塞 UI 主线程。"""
@@ -121,7 +131,7 @@ class ImportScreen(Screen):
             self.message = f"导入失败（系统异常）: {exc}"
         finally:
             self._is_importing = False
-            self._unregister_worker(self._import_worker)
+            safe_unregister_worker(self, self._import_worker)
             self._import_worker = None
             if getattr(self, "is_mounted", True):
                 self.render_panel()
@@ -207,34 +217,17 @@ class ImportScreen(Screen):
         self.query_one("#content-area", Static).update(text_panel("导入词表", lines, footer, height, width=width))
 
     def action_back(self) -> None:
-        self.cancel_import_worker()
+        self._cancel_workers()
         self.app.pop_screen()
 
     def on_unmount(self) -> None:
-        self.cancel_import_worker()
+        self._cancel_workers()
 
-    def cancel_import_worker(self) -> None:
+    def _cancel_workers(self) -> None:
         """取消仍在运行的导入 worker。"""
         if self._import_worker is not None:
             self._import_worker.cancel()
-            self._unregister_worker(self._import_worker)
             self._import_worker = None
-
-    def _register_worker(self, worker) -> None:
-        try:
-            app = self.app
-        except Exception:
-            return
-        if hasattr(app, "register_worker"):
-            app.register_worker(worker)
-
-    def _unregister_worker(self, worker) -> None:
-        try:
-            app = self.app
-        except Exception:
-            return
-        if hasattr(app, "unregister_worker"):
-            app.unregister_worker(worker)
 
     def content_width(self) -> int:
         return panel_width(self.size.width, 68)

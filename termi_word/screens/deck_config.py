@@ -4,8 +4,6 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
-import os
-import glob
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -13,7 +11,8 @@ from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Static
 
-from termi_word.config import DATA_DIR
+IMPORTS_DIR = None
+
 from termi_word.database.repositories import AppRepository
 from termi_word.domain.results import ImportResult
 from termi_word.services.import_service import ImportRow, ImportService
@@ -26,6 +25,8 @@ from termi_word.ui import (
     field_row,
     rule,
     toggle_footer_visible,
+    safe_register_worker,
+    safe_unregister_worker,
 )
 
 CSV_FIELDS = ["w", "zh", "en", "us", "c", "core", "ex", "exz"]
@@ -60,6 +61,8 @@ class DeckConfigScreen(Screen):
         self.csv_headers: list[str] = ["(未绑定)"]
         self.active_deck_name = "无"
         self.mapping: dict[str, str] = {}
+        self.is_busy = False
+        self._save_worker = None
         
         # 页面列表的行定义：(动作类型, 标签, 值)
         self.items: list[tuple[str, str, str]] = []
@@ -88,6 +91,10 @@ class DeckConfigScreen(Screen):
             self.app.open_search()
             return
 
+        if self.is_busy:
+            event.stop()
+            return
+
         key = event.key
 
         # 如果当前有挂起的二次确认动作
@@ -100,31 +107,9 @@ class DeckConfigScreen(Screen):
                 # 执行挂起的真实动作
                 if action == "sync_deck":
                     self.active_deck_name = self._pending_deck_key.split(":", 1)[1]
-                    self.save_deck_selection()
-                    self.load_config()
-                    self.last_msg = "正在同步词包数据中..."
-                    self.last_msg_severity = "info"
-                    self.render_panel()
-                    self.start_csv_import()
+                    self._do_sync_deck()
                 elif action == "change_mapping":
-                    field_name = self._pending_mapping_key[4:]
-                    current_mapping = self.mapping.get(field_name) or "(未绑定)"
-                    try:
-                        curr_idx = self.csv_headers.index(current_mapping)
-                        next_idx = (curr_idx + 1) % len(self.csv_headers)
-                    except ValueError:
-                        next_idx = 0
-                    chosen_header = self.csv_headers[next_idx]
-                    if chosen_header == "(未绑定)":
-                        self.mapping[field_name] = ""
-                    else:
-                        self.mapping[field_name] = chosen_header
-                    
-                    self.save_mapping()
-                    self.rebuild_items()
-                    self.last_msg = f"已更改 【{self._pending_mapping_label}】 绑定至 CSV 列: {chosen_header}"
-                    self.last_msg_severity = "success"
-                    self.render_panel()
+                    self._do_change_mapping()
                 elif action == "execute_import":
                     self.last_msg = "正在同步词包数据中..."
                     self.render_panel()
@@ -160,16 +145,20 @@ class DeckConfigScreen(Screen):
             return
 
     def scan_csv_files(self) -> None:
-        """扫描 DATA_DIR 下的所有 CSV 文件"""
+        """扫描外部导入目录下的所有 CSV 文件。"""
+        path = IMPORTS_DIR
+        if path is None:
+            from termi_word.config import IMPORTS_DIR as cfg_imports_dir
+            path = cfg_imports_dir
         self.csv_files = [
-            os.path.basename(p)
-            for p in glob.glob(str(DATA_DIR / "*.csv"))
-            if not os.path.basename(p).startswith(".")
+            p.name
+            for p in sorted(path.glob("*.csv"))
+            if not p.name.startswith(".")
         ]
-        self.csv_files = sorted(self.csv_files)
 
     def load_config(self) -> None:
         """加载数据库配置与当前 CSV Headers"""
+        from termi_word.config import IMPORTS_DIR
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
@@ -206,7 +195,11 @@ class DeckConfigScreen(Screen):
         # 读取当前 CSV 文件的 Headers
         self.csv_headers = ["(未绑定)"]
         if self.active_deck_name != "无可用CSV":
-            csv_path = DATA_DIR / self.active_deck_name
+            path = IMPORTS_DIR
+            if path is None:
+                from termi_word.config import IMPORTS_DIR as cfg_imports_dir
+                path = cfg_imports_dir
+            csv_path = path / self.active_deck_name
             if csv_path.exists():
                 try:
                     with csv_path.open("r", encoding="utf-8-sig") as f:
@@ -328,19 +321,11 @@ class DeckConfigScreen(Screen):
         self.render_panel()
 
     def action_back(self) -> None:
-        self.cancel_import_worker()
+        self._cancel_workers()
         self.app.pop_screen()
 
     def on_unmount(self) -> None:
-        self.cancel_import_worker()
-
-    def cancel_import_worker(self) -> None:
-        """取消仍在运行的词书同步 worker。"""
-        if self._import_worker is not None:
-            self._import_worker.cancel()
-            self._unregister_worker(self._import_worker)
-            self._import_worker = None
-        self._is_importing = False
+        self._cancel_workers()
 
     def action_select(self) -> None:
         """用户确认或修改某项"""
@@ -387,17 +372,7 @@ class DeckConfigScreen(Screen):
 
         # 3. 字段可见性控制
         if key in ("show_us", "show_en", "show_examples"):
-            if key == "show_us":
-                self.show_us = not self.show_us
-            elif key == "show_en":
-                self.show_en = not self.show_en
-            elif key == "show_examples":
-                self.show_examples = not self.show_examples
-            self.save_visibility()
-            self.rebuild_items()
-            self.last_msg = f"已更新【{label}】展示状态。"
-            self.last_msg_severity = "success"
-            self.render_panel()
+            self._do_save_visibility(key, label)
             return
 
         # 4. 执行数据同步导入
@@ -420,11 +395,39 @@ class DeckConfigScreen(Screen):
             return
         self._is_importing = True
         self._import_worker = self.run_worker(self.run_csv_import(), exclusive=True)
-        self._register_worker(self._import_worker)
+        safe_register_worker(self, self._import_worker)
 
-    def save_deck_selection(self) -> None:
-        """保存当前所选词书配置"""
-        deck_stem = Path(self.active_deck_name).stem
+    # ── 异步操作 ──────────────────────────────────────────────
+
+    def _do_sync_deck(self) -> None:
+        """异步切换词书：保存选择 → 重载配置 → 启动同步导入。"""
+        self.is_busy = True
+        self.last_msg = "正在切换词包并解析配置..."
+        self.last_msg_severity = "info"
+        self.render_panel()
+        self._save_worker = self.run_worker(self._async_sync_deck(), exclusive=True)
+        safe_register_worker(self, self._save_worker)
+
+    async def _async_sync_deck(self) -> None:
+        try:
+            deck_stem = Path(self.active_deck_name).stem
+            await asyncio.to_thread(self._save_deck_selection_db, deck_stem)
+            await asyncio.to_thread(self.load_config)
+            self.last_msg = "正在同步词包数据中..."
+            self.render_panel()
+            self.start_csv_import()
+        except Exception as exc:
+            self.last_msg = f"切换词包发生错误: {exc}"
+            self.last_msg_severity = "error"
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._save_worker)
+            self._save_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_panel()
+
+    def _save_deck_selection_db(self, deck_stem: str) -> None:
+        """保存当前所选词书配置（在后台线程中运行）。"""
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
@@ -432,16 +435,96 @@ class DeckConfigScreen(Screen):
             setting.active_deck_id = db_deck.id
             session.commit()
 
-    def save_mapping(self) -> None:
-        """保存绑定关系到数据库"""
+    def _do_change_mapping(self) -> None:
+        """异步切换字段映射绑定。"""
+        self.is_busy = True
+        self.last_msg = "正在保存映射关系..."
+        self.last_msg_severity = "info"
+        self.render_panel()
+        self._save_worker = self.run_worker(self._async_change_mapping(), exclusive=True)
+        safe_register_worker(self, self._save_worker)
+
+    async def _async_change_mapping(self) -> None:
+        field_name = self._pending_mapping_key[4:]
+        current_mapping = self.mapping.get(field_name) or "(未绑定)"
+        try:
+            curr_idx = self.csv_headers.index(current_mapping)
+            next_idx = (curr_idx + 1) % len(self.csv_headers)
+        except ValueError:
+            next_idx = 0
+        chosen_header = self.csv_headers[next_idx]
+        
+        old_mapping = self.mapping.get(field_name)
+        if chosen_header == "(未绑定)":
+            self.mapping[field_name] = ""
+        else:
+            self.mapping[field_name] = chosen_header
+            
+        try:
+            await asyncio.to_thread(self._save_mapping_db)
+            self.rebuild_items()
+            self.last_msg = f"已更改 【{self._pending_mapping_label}】 绑定至 CSV 列: {chosen_header}"
+            self.last_msg_severity = "success"
+        except Exception as exc:
+            self.mapping[field_name] = old_mapping or ""
+            self.last_msg = f"更改映射失败: {exc}"
+            self.last_msg_severity = "error"
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._save_worker)
+            self._save_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_panel()
+
+    def _save_mapping_db(self) -> None:
+        """保存绑定关系到数据库（在后台线程中运行）。"""
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
             setting.csv_column_mapping = json.dumps(self.mapping, ensure_ascii=False)
             session.commit()
 
-    def save_visibility(self) -> None:
-        """保存字段展示状态"""
+    def _do_save_visibility(self, key: str, label: str) -> None:
+        """异步保存字段展示状态。"""
+        self.is_busy = True
+        self.last_msg = "正在更新字段展示..."
+        self.last_msg_severity = "info"
+        self.render_panel()
+        self._save_worker = self.run_worker(self._async_save_visibility(key, label), exclusive=True)
+        safe_register_worker(self, self._save_worker)
+
+    async def _async_save_visibility(self, key: str, label: str) -> None:
+        if key == "show_us":
+            self.show_us = not self.show_us
+        elif key == "show_en":
+            self.show_en = not self.show_en
+        elif key == "show_examples":
+            self.show_examples = not self.show_examples
+
+        try:
+            await asyncio.to_thread(self._save_visibility_db)
+            self.rebuild_items()
+            self.last_msg = f"已更新【{label}】展示状态。"
+            self.last_msg_severity = "success"
+        except Exception as exc:
+            # 回滚
+            if key == "show_us":
+                self.show_us = not self.show_us
+            elif key == "show_en":
+                self.show_en = not self.show_en
+            elif key == "show_examples":
+                self.show_examples = not self.show_examples
+            self.last_msg = f"保存展示更新失败: {exc}"
+            self.last_msg_severity = "error"
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._save_worker)
+            self._save_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_panel()
+
+    def _save_visibility_db(self) -> None:
+        """保存字段展示状态（在后台线程中运行）。"""
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
@@ -450,10 +533,24 @@ class DeckConfigScreen(Screen):
             setting.show_examples = self.show_examples
             session.commit()
 
+    def _cancel_workers(self) -> None:
+        """取消仍在运行的后台 worker。"""
+        for attr in ("_import_worker", "_save_worker"):
+            worker = getattr(self, attr, None)
+            if worker is not None:
+                worker.cancel()
+                setattr(self, attr, None)
+        self._is_importing = False
+        self.is_busy = False
+
     async def run_csv_import(self) -> None:
         """执行 CSV 导入至 SQLite 数据库"""
+        path = IMPORTS_DIR
+        if path is None:
+            from termi_word.config import IMPORTS_DIR as cfg_imports_dir
+            path = cfg_imports_dir
         deck_stem = Path(self.active_deck_name).stem
-        import_service = ImportService(self.app.session_factory, csv_path=DATA_DIR / self.active_deck_name)
+        import_service = ImportService(self.app.session_factory, csv_path=path / self.active_deck_name)
         
         try:
             csv_to_use, rows, missing = await asyncio.to_thread(import_service.read_source_rows, deck_stem)
@@ -481,7 +578,7 @@ class DeckConfigScreen(Screen):
             self.last_msg_severity = "error"
         finally:
             self._is_importing = False
-            self._unregister_worker(self._import_worker)
+            safe_unregister_worker(self, self._import_worker)
             self._import_worker = None
         if getattr(self, "is_mounted", True):
             self.render_panel()
@@ -512,19 +609,3 @@ class DeckConfigScreen(Screen):
             skipped += partial.skipped
 
         return ImportResult(imported=imported, updated=updated, skipped=skipped)
-
-    def _register_worker(self, worker) -> None:
-        try:
-            app = self.app
-        except Exception:
-            return
-        if hasattr(app, "register_worker"):
-            app.register_worker(worker)
-
-    def _unregister_worker(self, worker) -> None:
-        try:
-            app = self.app
-        except Exception:
-            return
-        if hasattr(app, "unregister_worker"):
-            app.unregister_worker(worker)

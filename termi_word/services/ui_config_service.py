@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from termi_word.config import DATA_DIR
 
 DEFAULT_UI_CONFIG = {
     "footer": {
@@ -21,7 +20,14 @@ class UiConfigService:
     """提供各页面 Footer 的快捷键提示。"""
 
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or DATA_DIR / "ui_config.json"
+        self._path = path
+
+    @property
+    def path(self) -> Path:
+        if self._path is not None:
+            return self._path
+        from termi_word.config import DEFAULT_UI_CONFIG_PATH
+        return DEFAULT_UI_CONFIG_PATH
 
     def load(self) -> dict:
         """从 JSON 配置文件加载配置。若不存在则生成默认配置。"""

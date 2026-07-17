@@ -62,11 +62,11 @@ class TestImportScreenLifecycle(unittest.TestCase):
 
         self.assertEqual(calls, [])
 
-    def test_cancel_import_worker_cancels_import_worker(self) -> None:
+    def test_cancel_workers_cancels_import_worker(self) -> None:
         screen, worker, _ = self.make_screen()
         screen._import_worker = worker
 
-        screen.cancel_import_worker()
+        screen._cancel_workers()
 
         self.assertTrue(worker.cancelled)
         self.assertIsNone(screen._import_worker)
@@ -117,12 +117,12 @@ class TestDeckConfigImportLifecycle(unittest.TestCase):
         self.assertIs(screen._import_worker, worker)
         self.assertEqual(screen.last_msg, "词书同步正在进行中，请稍候。")
 
-    def test_cancel_import_worker_cancels_worker(self) -> None:
+    def test_cancel_workers_cancels_worker(self) -> None:
         screen, worker, _ = self.make_screen()
         screen._is_importing = True
         screen._import_worker = worker
 
-        screen.cancel_import_worker()
+        screen._cancel_workers()
 
         self.assertTrue(worker.cancelled)
         self.assertFalse(screen._is_importing)

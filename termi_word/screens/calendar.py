@@ -1,6 +1,7 @@
 """日历打卡与目标配置屏幕。"""
 from __future__ import annotations
 
+import asyncio
 import calendar
 from datetime import date
 from sqlalchemy.exc import StatementError
@@ -18,6 +19,8 @@ from termi_word.ui import (
     render_footer,
     rule,
     toggle_footer_visible,
+    safe_register_worker,
+    safe_unregister_worker,
 )
 from termi_word.ui.layout import compute_frame_layout
 
@@ -40,6 +43,8 @@ class CalendarScreen(Screen):
         self.values: dict[str, int] = {}
         self.last_msg = ""
         self.last_msg_severity = "info"
+        self.is_busy = False
+        self._save_worker = None
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
@@ -183,6 +188,10 @@ class CalendarScreen(Screen):
             self.app.open_search()
             return
 
+        if self.is_busy:
+            event.stop()
+            return
+
         key = event.key
         inp = self.query_one("#calendar-input", Input)
 
@@ -246,35 +255,51 @@ class CalendarScreen(Screen):
         if event.input.id != "calendar-input":
             return
         
+        if self.is_busy:
+            return
+        
         key, label = self.fields[self.selected]
         try:
             val = int(event.value.strip() or "0")
             if val < 0:
                 raise ValueError("数值不能小于 0")
             
-            # 更新本地及数据库
-            self.values[key] = val
-            self._save_values()
-            self.last_msg = f"已保存修改！【{label}】新目标为 {val}。"
-            self.last_msg_severity = "success"
-            self._close_editor()
+            self._do_save_values(key, val, label)
         except (ValueError, StatementError) as err:
             self.last_msg = f"输入错误：{err}"
             self.last_msg_severity = "error"
             self.render_calendar()
 
-    def _close_editor(self) -> None:
-        """关闭并隐藏输入框。"""
-        self.editing = False
-        inp_row = self.query_one(".input-row", Horizontal)
-        inp = self.query_one("#calendar-input", Input)
-        inp.display = False
-        inp_row.display = False
-        self.focus()
+    def _do_save_values(self, key: str, val: int, label: str) -> None:
+        """异步保存计划目标值。"""
+        self.is_busy = True
+        self.last_msg = "正在保存配置..."
+        self.last_msg_severity = "info"
         self.render_calendar()
+        self._save_worker = self.run_worker(self._async_save_values(key, val, label), exclusive=True)
+        safe_register_worker(self, self._save_worker)
 
-    def _save_values(self) -> None:
-        """同步并持久化配置更改到数据库。"""
+    async def _async_save_values(self, key: str, val: int, label: str) -> None:
+        old_val = self.values[key]
+        self.values[key] = val
+        try:
+            await asyncio.to_thread(self._save_values_db)
+            self.last_msg = f"已保存修改！【{label}】新目标为 {val}。"
+            self.last_msg_severity = "success"
+            if getattr(self, "is_mounted", True):
+                self._close_editor()
+        except Exception as exc:
+            self.values[key] = old_val
+            self.last_msg = f"保存配置失败: {exc}"
+            self.last_msg_severity = "error"
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._save_worker)
+            self._save_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_calendar()
+
+    def _save_values_db(self) -> None:
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
@@ -285,6 +310,21 @@ class CalendarScreen(Screen):
             if deck is not None:
                 repo.close_open_sessions(deck.id)
             session.commit()
+
+    def on_unmount(self) -> None:
+        if self._save_worker is not None:
+            self._save_worker.cancel()
+            self._save_worker = None
+
+    def _close_editor(self) -> None:
+        """关闭并隐藏输入框。"""
+        self.editing = False
+        inp_row = self.query_one(".input-row", Horizontal)
+        inp = self.query_one("#calendar-input", Input)
+        inp.display = False
+        inp_row.display = False
+        self.focus()
+        self.render_calendar()
 
     def _plan_field_lines(self, editing: bool) -> list[str]:
         """返回每日学习计划字段行，保证光标选择始终可见。"""

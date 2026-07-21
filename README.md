@@ -238,7 +238,7 @@ python -m termi_word
 ### 打包产物结构
 
 ```text
-E:/termi_word_package/
+./termi_word_package/           # 默认位于当前执行路径的 pwd 下
 ├── termi-word(.exe)            # 单文件可执行程序
 └── data/
     └── imports/                # 放置待导入 CSV 词书
@@ -274,11 +274,11 @@ sh ./scripts/build.sh
 
 **3. 自定义打包目录**
 
-默认打包工作目录为 `E:/termi_word_package/`，可通过参数修改：
+默认打包工作目录为当前执行路径下的 `termi_word_package/` 目录，可通过参数自定义修改打包输出路径：
 
 ```powershell
-# Windows
-.\scripts\build.ps1 -PackageRoot "D:/my_package"
+# Windows (直接按位置传入自定义打包目标路径)
+.\scripts\build.ps1 "D:/my_package"
 
 # macOS/Linux
 PACKAGE_ROOT="/path/to/my_package" sh ./scripts/build.sh

@@ -273,13 +273,13 @@ class DeckConfigScreen(Screen):
 
     def render_panel(self) -> None:
         """根据当前配置渲染面板"""
-        footer_text = "↑↓ 选择   Enter 启用/同步   Ctrl+/ 搜索   Esc 返回"
+        footer_text = "↑↓ 选择   Enter 启用/同步   词书位置: termi_data/imports/   Esc 返回"
         content_height, width = self.apply_dynamic_layout(footer_text)
         content_widget = self.query_one("#content-area", Static)
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
 
-        title = "Deck Config / Pending" if self.pending_action is not None else "Deck Config / Browse"
+        title = "词书配置 / 编辑中" if self.pending_action is not None else "词书配置 / 浏览"
         eff_height = max(1, content_height - 2)
 
         # 向上/下滚动裁剪计算

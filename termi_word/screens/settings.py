@@ -10,7 +10,6 @@ from textual.screen import Screen
 from textual.widgets import Input, Static
 
 from termi_word.database.repositories import AppRepository
-from termi_word.runtime_paths import RUNTIME_PATHS, save_runtime_path_overrides
 from termi_word.services.home_shortcut_service import (
     HOME_ACTIONS,
     normalize_shortcut,
@@ -52,15 +51,13 @@ class SettingsScreen(Screen):
         ("panel_max_width", "最大宽度", "int"),
         ("panel_min_height", "最小高度", "int"),
         ("panel_max_height", "最大高度", "int"),
-        ("data_dir", "数据目录", "path"),
         ("deck_config", "词书与映射管理", "navigate"),
     ]
     sections = {
         0: "学习计划",
         3: "快捷键",
         10: "时间与界面",
-        14: "文件位置",
-        15: "词书管理",
+        14: "词书管理",
     }
 
     # 快捷键友好名称映射
@@ -114,10 +111,6 @@ class SettingsScreen(Screen):
             for key, _, kind in self.fields:
                 if kind == "navigate":
                     self.values[key] = ">>"
-                    continue
-                if kind == "path":
-                    if key == "data_dir":
-                        self.values[key] = RUNTIME_PATHS.data_dir.as_posix()
                     continue
                 val = getattr(setting, key)
                 if kind == "bool":
@@ -190,7 +183,7 @@ class SettingsScreen(Screen):
                 val_str = "是" if self.values[key] else "否"
             elif kind == "timezone":
                 val_str = format_offset(int(self.values[key]))
-            elif kind in {"text", "home_key", "path"}:
+            elif kind in {"text", "home_key"}:
                 val_str = self.FRIENDLY_SHORTCUTS.get(
                     str(self.values[key]), str(self.values[key])
                 )
@@ -286,10 +279,10 @@ class SettingsScreen(Screen):
             return
         if kind == "bool":
             self.values[key] = not bool(self.values[key])
-            self._do_save_settings(is_path=False)
+            self._do_save_settings()
             return
 
-        # int/text/path 类型打开底部输入框
+        # int/text 类型打开底部输入框
         self.editing = True
         inp_row = self.query_one(".input-row", Horizontal)
         inp = self.query_one("#settings-input", Input)
@@ -308,9 +301,6 @@ class SettingsScreen(Screen):
             friendly = self.FRIENDLY_SHORTCUTS.get(str(self.values[key]), str(self.values[key]))
             inp.value = friendly
             self.last_msg = f"正在修改【{label}】，可选: Ctrl+/ Ctrl+P Ctrl+S Ctrl+F Ctrl+K Ctrl+Q"
-        elif kind == "path":
-            inp.value = str(self.values[key])
-            self.last_msg = f"正在修改【{label}】，请输入目录路径，保存后实时更新生效"
         else:
             inp.value = str(self.values[key])
             self.last_msg = f"正在修改【{label}】数值"
@@ -334,27 +324,22 @@ class SettingsScreen(Screen):
             if kind == "timezone":
                 val = parse_offset(raw)
                 self.values[key] = val
-                self._do_save_settings(is_path=False)
+                self._do_save_settings()
             elif kind == "home_key":
                 val = normalize_shortcut(raw)
                 self.values[key] = val
-                self._do_save_settings(is_path=False)
+                self._do_save_settings()
             elif kind == "text":
                 val = self.SHORTCUT_KEYS.get(raw, raw.lower().replace(" ", ""))
                 if not val:
                     raise ValueError("快捷键不能为空")
                 self.values[key] = val
-                self._do_save_settings(is_path=False)
-            elif kind == "path":
-                if not raw:
-                    raise ValueError("路径不能为空")
-                self.values[key] = raw
-                self._do_save_settings(is_path=True)
+                self._do_save_settings()
             else:
                 val = int(raw or "0")
                 if val < 0:
                     raise ValueError("数值不能为负数")
-                
+
                 # 宽高设置边界校验
                 if key == "panel_min_height" and not (3 <= val <= 16):
                     raise ValueError("最小高度范围为 3-16")
@@ -371,7 +356,7 @@ class SettingsScreen(Screen):
                     raise ValueError("最小高度不能大于最大高度")
 
                 self.values[key] = val
-                self._do_save_settings(is_path=False, reset_study_sessions=key in self.PLAN_FIELDS)
+                self._do_save_settings(reset_study_sessions=key in self.PLAN_FIELDS)
         except (ValueError, StatementError) as err:
             self.last_msg = f"输入错误：{err}"
             self.last_msg_severity = "error"
@@ -387,32 +372,28 @@ class SettingsScreen(Screen):
         self.focus()
         self.render_settings()
 
-    def _do_save_settings(self, is_path: bool = False, reset_study_sessions: bool = False) -> None:
+    def _do_save_settings(self, reset_study_sessions: bool = False) -> None:
         """异步保存设置。"""
         self.is_busy = True
         self.last_msg = "正在保存配置..."
         self.last_msg_severity = "info"
         self.render_settings()
         self._save_worker = self.run_worker(
-            self._async_save_settings(is_path, reset_study_sessions), exclusive=True
+            self._async_save_settings(reset_study_sessions), exclusive=True
         )
         safe_register_worker(self, self._save_worker)
 
-    async def _async_save_settings(self, is_path: bool = False, reset_study_sessions: bool = False) -> None:
+    async def _async_save_settings(self, reset_study_sessions: bool = False) -> None:
         try:
-            if is_path:
-                await asyncio.to_thread(self._save_path_values_db)
-                self.last_msg = "路径配置已更新并实时生效。"
+            await asyncio.to_thread(self._save_values_db, reset_study_sessions)
+            key, label, kind = self.fields[self.selected]
+            if kind == "bool":
+                self.last_msg = f"已切换！【{label}】新状态为: {'是' if self.values[key] else '否'}。"
             else:
-                await asyncio.to_thread(self._save_values_db, reset_study_sessions)
-                key, label, kind = self.fields[self.selected]
-                if kind == "bool":
-                    self.last_msg = f"已切换！【{label}】新状态为: {'是' if self.values[key] else '否'}。"
-                else:
-                    friendly = self.FRIENDLY_SHORTCUTS.get(str(self.values[key]), str(self.values[key]))
-                    self.last_msg = f"修改成功。【{label}】设定为 {friendly}。"
+                friendly = self.FRIENDLY_SHORTCUTS.get(str(self.values[key]), str(self.values[key]))
+                self.last_msg = f"修改成功。【{label}】设定为 {friendly}。"
             self.last_msg_severity = "success"
-            
+
             if getattr(self, "is_mounted", True):
                 self._close_editor()
         except Exception as exc:
@@ -444,12 +425,12 @@ class SettingsScreen(Screen):
             "ctrl+shift+underscore",
         }
         validate_home_shortcuts(shortcuts, reserved=reserved)
-        
+
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
             for key, _, kind in self.fields:
-                if kind in {"navigate", "path"}:
+                if kind == "navigate":
                     continue
                 val = self.values[key]
                 if kind == "bool":
@@ -465,21 +446,12 @@ class SettingsScreen(Screen):
                 if deck is not None:
                     repo.close_open_sessions(deck.id)
             session.commit()
-            
+
         self.app.refresh_settings_cache()
-        # 后台线程保存时区配置到文件
+        # 保存时区配置到数据库
         timezone_val = self.values.get("timezone_offset_minutes")
         if timezone_val is not None:
-            TimeSettingsService().save_config(int(timezone_val))
-
-    def _save_path_values_db(self) -> None:
-        """保存数据目录引导配置，并热更新应用（在后台线程中运行）。"""
-        save_runtime_path_overrides(
-            app_root=RUNTIME_PATHS.app_root,
-            data_dir=str(self.values["data_dir"]),
-        )
-        self.app.reload_database_and_services()
-        self._load_values()
+            TimeSettingsService(self.app.session_factory).save_config(int(timezone_val))
 
     def on_unmount(self) -> None:
         if self._save_worker is not None:

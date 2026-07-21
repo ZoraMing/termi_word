@@ -16,7 +16,7 @@ class ReviewScreen(TermiScreen):
 
     BINDINGS = []  # 键盘由 on_key 统一控制以实现更细致的无焦点拦截
 
-    def __init__(self, cards: list[Card], session_id: int | None, is_extra: bool = False) -> None:
+    def __init__(self, cards: list[Card], session_id: int | None, is_extra: bool = False, mode: str = "mixed") -> None:
         super().__init__()
         self.cards = cards
         self.session_id = session_id
@@ -28,6 +28,7 @@ class ReviewScreen(TermiScreen):
         self.content_scroll = 0
         self._has_extra_option = False
         self.is_extra = is_extra
+        self.mode = mode
         self._waiting = False
         self._auto_advance_worker = None
         self._extra_study_worker = None
@@ -45,9 +46,37 @@ class ReviewScreen(TermiScreen):
             return None
         return self.cards[self.index]
 
+    def _fetch_render_status(self, card_is_none: bool):
+        """统一获取背词屏渲染所需的数据库状态。"""
+        with self.app.session_factory() as session:
+            repo = AppRepository(session)
+            deck = repo.active_deck()
+            setting = repo.get_settings()
+            if not deck:
+                return None, setting, 0, 0, False
+
+            today_new_left = repo.remaining_new_count(deck.id)
+            today_rev_left = len(repo.due_cards(deck.id))
+            has_extra = False
+
+            if card_is_none:
+                extra_cands = self.app.study_service._get_future_due_cards(session, deck.id, 1)
+                if self.mode == "new":
+                    has_extra = (today_new_left > 0)
+                elif self.mode == "review":
+                    has_extra = (len(extra_cands) > 0)
+                else:  # mixed
+                    has_extra = (today_new_left > 0 or len(extra_cands) > 0)
+
+            return deck, setting, today_new_left, today_rev_left, has_extra
+
     def render_card(self) -> None:
         """根据当前状态渲染核心内容和提示，支持自适应高宽与滚动。"""
         card = self.current_card
+        deck, setting, today_new_left, today_rev_left, has_extra = self._fetch_render_status(card is None)
+
+        mode_zh = {"mixed": "学习", "new": "新词", "review": "复习"}.get(self.mode, "学习")
+        prefix = "额外" if self.is_extra else ""
 
         # 1. 队列完成状态
         if card is None:
@@ -60,33 +89,30 @@ class ReviewScreen(TermiScreen):
                 ]
                 self._has_extra_option = False
                 self.refresh_ui(
-                    header="复习 加载额外",
+                    header=f"{prefix}{mode_zh} 加载额外",
                     lines=lines,
                     message=self.feedback or "",
                     footer="Esc 返回"
                 )
                 return
 
-            # 检查是否有剩余新词或者未来要复习的卡片
-            with self.app.session_factory() as session:
-                repo = AppRepository(session)
-                deck = repo.active_deck()
-                has_extra = False
-                if deck:
-                    extra_cands = self.app.study_service._get_future_due_cards(session, deck.id, 1)
-                    has_extra = (repo.remaining_new_count(deck.id) > 0 or len(extra_cands) > 0)
-            
             if deck and has_extra:
+                if self.mode == "new":
+                    extra_type_str = "新词"
+                elif self.mode == "review":
+                    extra_type_str = "复习"
+                else:
+                    extra_type_str = "混合"
                 lines = [
                     "",
                     "      今日计划学习队列已完成。",
                     "",
-                    "      按 Enter 键加载 20 个额外混合单词继续学习，",
+                    f"      按 Enter 键加载 {setting.daily_new_target} 个额外{extra_type_str}单词继续学习，",
                     "      或按 Esc 返回。",
                 ]
                 self._has_extra_option = True
                 self.refresh_ui(
-                    header="复习 继续",
+                    header=f"{prefix}{mode_zh} 继续",
                     lines=lines,
                     message=self.feedback or "",
                     footer="Enter 额外学习  Esc 返回"
@@ -101,7 +127,7 @@ class ReviewScreen(TermiScreen):
                 ]
                 self._has_extra_option = False
                 self.refresh_ui(
-                    header="复习 完成",
+                    header=f"{prefix}{mode_zh} 完成",
                     lines=lines,
                     message=self.feedback or "",
                     footer="Esc 返回"
@@ -109,15 +135,21 @@ class ReviewScreen(TermiScreen):
                 return
 
         word = card.word
+        # 计算当前队列中剩余的新词与复习词数
+        rem_new = sum(1 for c in self.cards[self.index:] if c.reps == 0)
+        rem_rev = sum(1 for c in self.cards[self.index:] if c.reps > 0)
+        queue_detail = f" (新:{rem_new} 复:{rem_rev})" if len(self.cards) > 0 else ""
+        
         bar = make_tui_progress_bar(self.index + 1, len(self.cards))
-        progress = f"{bar} [{self.index + 1}/{len(self.cards)}]"
+        progress = f"{bar} [{self.index + 1}/{len(self.cards)}]{queue_detail}"
         star_flag = " *" if word.is_starred else ""
+        today_stats = f" | 待学: {today_new_left}新 {today_rev_left}复"
 
         # 2. 区分正面与背面
         if not self.is_revealed:
             # 正面：仅单词、音标、词性/分类
             us_str = f"/{word.us}/" if word.us else ""
-            title_tag = "额外复习 正面" if self.is_extra else "复习 正面"
+            title_tag = f"{prefix}{mode_zh} 正面"
             lines = [
                 f"  [#F59E0B]{word.w}[/]",
                 f"  {us_str}" if us_str else "",
@@ -125,7 +157,7 @@ class ReviewScreen(TermiScreen):
             ]
             msg = self.feedback or "[正面] 请记忆单词，按 Space/Enter 翻卡，或按 1-4 快速评分"
             self.refresh_ui(
-                header=f"{title_tag}  {progress}{star_flag}",
+                header=f"{title_tag}  {progress}{star_flag}{today_stats}",
                 lines=lines,
                 message=msg,
                 footer="Space 翻卡  1-4 评分  t 挂起  f 收藏  Esc 返回"
@@ -138,12 +170,6 @@ class ReviewScreen(TermiScreen):
             header_text = f"  [#F59E0B]{word.w}[/]{us_str}  [{word.c or '-'}]"
             all_lines = []
             all_lines.extend(wrap_display(header_text, width=width, continuation_indent="  "))
-            
-            # 从 app 缓存中加载展示开关，避免在渲染主循环中频繁访问 SQLite
-            setting = getattr(self.app, "settings", None)
-            if setting is None:
-                with self.app.session_factory() as session:
-                    setting = AppRepository(session).get_settings()
             
             if word.core:
                 all_lines.extend(wrap_display(f"  [#6B7280]Core:[/] {word.core}", width=width, continuation_indent="        "))
@@ -173,7 +199,7 @@ class ReviewScreen(TermiScreen):
             else:
                 visible = all_lines
 
-            title_tag = "额外复习 背面" if self.is_extra else "复习 背面"
+            title_tag = f"{prefix}{mode_zh} 背面"
             
             rating_names = {1: "陌生", 2: "熟悉", 3: "记得", 4: "掌握"}
             if self.pending_rating is not None:
@@ -183,7 +209,7 @@ class ReviewScreen(TermiScreen):
                 msg = "[背面] 请评分: [1] 陌生  [2] 熟悉  [3] 记得  [4] 掌握"
                 
             self.refresh_ui(
-                header=f"{title_tag}  {progress}{star_flag}",
+                header=f"{title_tag}  {progress}{star_flag}{today_stats}",
                 lines=visible,
                 message=msg,
                 footer="1-4 评分  Space/Enter 确认  t 挂起  f 收藏  Esc 返回"
@@ -371,14 +397,15 @@ class ReviewScreen(TermiScreen):
     async def _async_load_extra_study(self) -> None:
         """异步加载额外学习队列并刷新当前复习屏。"""
         try:
-            queue = await asyncio.to_thread(self.app.study_service.build_today_queue, "mixed")
+            queue = await asyncio.to_thread(self.app.study_service.build_today_queue, self.mode)
             self.cards = queue.cards
             self.session_id = queue.session_id
             self.index = 0
             self.is_revealed = False
             self.pending_action = None
             self.is_extra = True
-            self.feedback = "已进入额外学习模式。"
+            mode_zh = {"mixed": "学习", "new": "新词", "review": "复习"}.get(self.mode, "学习")
+            self.feedback = f"已进入额外{mode_zh}模式。"
         except asyncio.CancelledError:
             self.feedback = "已取消加载额外学习。"
             raise

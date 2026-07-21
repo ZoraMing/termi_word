@@ -18,6 +18,7 @@ SETTINGS_COLUMNS = {
     "home_key_words": "ALTER TABLE settings ADD COLUMN home_key_words VARCHAR(30) DEFAULT '4'",
     "home_key_calendar": "ALTER TABLE settings ADD COLUMN home_key_calendar VARCHAR(30) DEFAULT '5'",
     "home_key_settings": "ALTER TABLE settings ADD COLUMN home_key_settings VARCHAR(30) DEFAULT '6'",
+    "footer": "ALTER TABLE settings ADD COLUMN footer TEXT",
 }
 
 

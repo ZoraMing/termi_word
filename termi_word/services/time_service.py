@@ -1,11 +1,9 @@
 """本地业务时间配置。"""
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Callable
 
 _OFFSET_RE = re.compile(r"^([+-])(\d{2}):(\d{2})$")
@@ -51,57 +49,53 @@ def timezone_from_offset(offset_minutes: int) -> timezone:
 
 
 class TimeSettingsService:
-    """启动时校验本地时间配置文件。"""
+    """时区配置服务，数据存储在数据库。"""
 
     def __init__(
         self,
-        config_path: Path | None = None,
+        session_factory: Callable | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
-        self._config_path = config_path
+        self._session_factory = session_factory
         self.now = now or (lambda: datetime.now().astimezone())
 
-    @property
-    def config_path(self) -> Path:
-        if self._config_path is not None:
-            return self._config_path
-        from termi_word.config import LOCAL_TIME_CONFIG_PATH
-        return LOCAL_TIME_CONFIG_PATH
+    def _get_session_factory(self):
+        """获取数据库会话工厂。"""
+        if self._session_factory is not None:
+            return self._session_factory
+        from termi_word.database.engine import get_session_factory
+        return get_session_factory()
 
     def ensure_config(self) -> LocalTimeConfig:
         """确保本地时区配置存在；已存在时不覆盖用户修改。"""
-        if self.config_path.exists():
-            data = json.loads(self.config_path.read_text(encoding="utf-8"))
-            return LocalTimeConfig(int(data.get("timezone_offset_minutes", 0)))
+        from termi_word.database.repositories import AppRepository
 
-        config = LocalTimeConfig(system_timezone_offset_minutes(self.now()))
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(
-            json.dumps(
-                {
-                    "timezone_offset_minutes": config.timezone_offset_minutes,
-                    "timezone_offset": format_offset(config.timezone_offset_minutes),
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        return config
+        session_factory = self._get_session_factory()
+        with session_factory() as session:
+            repo = AppRepository(session)
+            setting = repo.get_settings()
+
+            # 如果数据库中已有配置，直接返回
+            if setting.timezone_offset_minutes is not None:
+                return LocalTimeConfig(setting.timezone_offset_minutes)
+
+            # 首次运行：检测系统时区并保存
+            offset = system_timezone_offset_minutes(self.now())
+            setting.timezone_offset_minutes = offset
+            session.commit()
+            return LocalTimeConfig(offset)
 
     def save_config(self, offset_minutes: int) -> LocalTimeConfig:
         """保存用户在设置页修改后的本地时区配置。"""
+        from termi_word.database.repositories import AppRepository
+
         config = LocalTimeConfig(int(offset_minutes))
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(
-            json.dumps(
-                {
-                    "timezone_offset_minutes": config.timezone_offset_minutes,
-                    "timezone_offset": format_offset(config.timezone_offset_minutes),
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+
+        session_factory = self._get_session_factory()
+        with session_factory() as session:
+            repo = AppRepository(session)
+            setting = repo.get_settings()
+            setting.timezone_offset_minutes = config.timezone_offset_minutes
+            session.commit()
+
         return config

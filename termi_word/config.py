@@ -10,9 +10,6 @@ DATA_DIR: Path
 IMPORTS_DIR: Path
 DEFAULT_DB_PATH: Path
 DEFAULT_CSV_PATH: Path
-DEFAULT_UI_CONFIG_PATH: Path
-PATHS_CONFIG_PATH: Path
-LOCAL_TIME_CONFIG_PATH: Path
 
 # 配置属性到 RuntimePaths 属性的映射（字典查找 O(1) 优于 if 链 O(n)）
 _CONFIG_MAP: dict[str, str | tuple[str, str]] = {
@@ -20,9 +17,6 @@ _CONFIG_MAP: dict[str, str | tuple[str, str]] = {
     "IMPORTS_DIR": "imports_dir",
     "DEFAULT_DB_PATH": "db_path",
     "DEFAULT_CSV_PATH": ("imports_dir", "words.csv"),
-    "DEFAULT_UI_CONFIG_PATH": "ui_config_path",
-    "PATHS_CONFIG_PATH": "paths_config_path",
-    "LOCAL_TIME_CONFIG_PATH": "local_time_config_path",
 }
 
 

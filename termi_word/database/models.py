@@ -172,5 +172,6 @@ class Setting(Base):
     panel_max_height = Column(Integer, default=16)
     csv_column_mapping = Column(Text, nullable=True)
     timezone_offset_minutes = Column(Integer, nullable=True)
+    footer = Column(Text, nullable=True)  # JSON 格式的 footer 配置
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

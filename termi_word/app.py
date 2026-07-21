@@ -52,8 +52,8 @@ class TermiWordApp(App):
         self.import_service = ImportService(self.session_factory)
         self.study_service = StudyService(self.session_factory)
         self.spelling_service = SpellingService(self.session_factory)
-        self.ui_config = UiConfigService()
-        self.time_settings = TimeSettingsService()
+        self.ui_config = UiConfigService(self.session_factory)
+        self.time_settings = TimeSettingsService(self.session_factory)
         self.settings = SimpleNamespace(
             search_shortcut="ctrl+slash",
             panel_max_width=120,
@@ -83,6 +83,7 @@ class TermiWordApp(App):
     async def bootstrap(self) -> None:
         """异步执行数据库初始化、默认数据载入，并安装所有屏。"""
         await asyncio.to_thread(init_database, self.session_factory)
+        await asyncio.to_thread(self._migrate_old_configs)
         await asyncio.to_thread(self._ensure_local_time_settings)
         await asyncio.to_thread(self.import_service.ensure_initial_data)
         await asyncio.to_thread(self.refresh_settings_cache)
@@ -104,7 +105,7 @@ class TermiWordApp(App):
     async def _start_study(self, mode: str) -> None:
         queue = await asyncio.to_thread(self.study_service.build_today_queue, mode)
         # 跳转至学习背词页，将卡片队列及会话 ID 传入
-        self.push_screen(ReviewScreen(queue.cards, queue.session_id, is_extra=queue.is_extra))
+        self.push_screen(ReviewScreen(queue.cards, queue.session_id, is_extra=queue.is_extra, mode=mode))
 
     def action_open_search(self, deck_id: int | None = None) -> None:
         """全局搜索动作（由 BINDINGS 触发，priority=True 绕过 Input 焦点拦截）。
@@ -198,51 +199,14 @@ class TermiWordApp(App):
             )
             self._search_shortcut = self.settings.search_shortcut
 
-    def reload_database_and_services(self) -> None:
-        """热更新数据库路径，重新创建连接池及所有关联服务。"""
-        from termi_word.runtime_paths import RUNTIME_PATHS, ensure_data_directories
-        from termi_word.database.engine import create_session_factory, init_database
-        from termi_word.config import DEFAULT_DB_PATH
-
-        # 1. 确保新路径的物理目录存在
-        ensure_data_directories(RUNTIME_PATHS)
-
-        # 2. 关闭并释放旧的数据库连接引擎
-        if self._engine is not None:
-            self._engine.dispose()
-            self._engine = None
-
-        # 3. 根据最新的 DEFAULT_DB_PATH 重新创建 session_factory
-        self.session_factory = create_session_factory(DEFAULT_DB_PATH)
-        self._engine = self.session_factory.kw.get("bind")
-
-        # 4. 更新相关服务绑定的 session_factory
-        self.import_service.session_factory = self.session_factory
-        self.study_service.session_factory = self.session_factory
-        self.spelling_service.session_factory = self.session_factory
-
-        # 5. 初始化新库并创建表结构，确保生成必要基础数据
-        init_database(self.session_factory)
-        self._ensure_local_time_settings()
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(asyncio.to_thread(self.import_service.ensure_initial_data))
-        except RuntimeError:
-            self.import_service.ensure_initial_data()
-
-        # 6. 刷新当前缓存的系统设置
-        self.refresh_settings_cache()
+    def _migrate_old_configs(self) -> None:
+        """迁移旧版本的配置文件到数据库。"""
+        from termi_word.runtime_paths import migrate_old_configs_to_db
+        migrate_old_configs_to_db(RUNTIME_PATHS.data_dir, self.session_factory)
 
     def _ensure_local_time_settings(self) -> None:
-        """启动时校验一次系统时区，并把结果写入本地配置和数据库默认值。"""
-        config = self.time_settings.ensure_config()
-        from termi_word.database.repositories import AppRepository
-        with self.session_factory() as session:
-            setting = AppRepository(session).get_settings()
-            if getattr(setting, "timezone_offset_minutes", None) is None:
-                setting.timezone_offset_minutes = config.timezone_offset_minutes
-                session.commit()
+        """启动时校验一次系统时区，并把结果写入数据库。"""
+        self.time_settings.ensure_config()
 
     def is_search_shortcut(self, key: str) -> bool:
         """统一判断全局搜索快捷键，兼容历史默认键值。"""
@@ -288,3 +252,14 @@ class TermiWordApp(App):
             if self.screen.__class__.__name__ != "TodayScreen":
                 event.stop()
                 self.go_back()
+
+
+def main() -> None:
+    """Termi Word 统一启动入口。"""
+    app = TermiWordApp()
+    app.run()
+
+
+if __name__ == "__main__":
+    main()
+

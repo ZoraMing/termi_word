@@ -4,5 +4,5 @@ Textual
 
 # 打包依赖
 nuitka>=2.0
-ordered-set
-zstandard
+# ordered-set
+# zstandard

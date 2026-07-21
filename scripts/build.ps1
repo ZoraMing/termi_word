@@ -1,66 +1,57 @@
 param(
-    [string]$Python = "",
-    [string]$PackageRoot = "E:/termi_word_package"
+    [string]$PackageRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-if (-not $Python) {
-    if ($env:VIRTUAL_ENV -or $env:CONDA_PREFIX) {
-        $Python = "python"
-    } else {
-        $VenvPython = Join-Path $ProjectRoot ".venv_build/Scripts/python.exe"
-        $Python = if (Test-Path -LiteralPath $VenvPython) { $VenvPython } else { "python" }
-    }
+
+if (-not $PackageRoot) {
+    $PackageRoot = Join-Path $ProjectRoot "output"
 }
 
-$PackageRoot = [System.IO.Path]::GetFullPath($PackageRoot)
-$OutputDir = Join-Path $PackageRoot "output"
-$CacheRoot = Join-Path $PackageRoot "cache"
+# 使用 .venv 虚拟环境
+$Python = Join-Path $ProjectRoot ".venv/Scripts/python.exe"
+if (-not (Test-Path -LiteralPath $Python)) {
+    throw "未找到打包虚拟环境: $Python"
+}
+
+$OutputDir = $PackageRoot
+$CacheRoot = Join-Path $ProjectRoot "cache"
 $LocalAppData = Join-Path $CacheRoot "local-appdata"
-$TempDir = Join-Path $PackageRoot "temp"
+$TempDir = Join-Path $ProjectRoot "temp"
 New-Item -ItemType Directory -Force -Path $OutputDir, $LocalAppData, $TempDir | Out-Null
 
 $env:LOCALAPPDATA = $LocalAppData
 $env:TEMP = $TempDir
 $env:TMP = $TempDir
+$env:PYTHONPATH = $ProjectRoot
+
+Write-Host "使用打包环境: $Python"
 
 & $Python -m nuitka `
     --standalone `
+    --mingw64 `
+    --jobs=8 `
     --assume-yes-for-downloads `
     --output-dir="$OutputDir" `
     --output-filename="termi-word" `
     --include-package="termi_word" `
+    --include-package="fsrs" `
+    --include-package="sqlalchemy" `
+    --show-progress `
     --include-data-dir="$ProjectRoot/termi_word/styles=termi_word/styles" `
-    --mingw64 `
-    --lto=yes `
+    --nofollow-import-to=termi_word.tests `
     --nofollow-import-to=pytest `
-    --nofollow-import-to=openai `
-    --nofollow-import-to=pydantic `
-    --nofollow-import-to=httpx `
-    --nofollow-import-to=requests `
-    --nofollow-import-to=urllib3 `
-    --nofollow-import-to=anyio `
+    --nofollow-import-to=nuitka `
     "$ProjectRoot/termi_word/__main__.py"
 
-$DistDir = Get-ChildItem -LiteralPath $OutputDir -Directory -Filter "*.dist" |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
-
-if (-not $DistDir) {
-    throw "Nuitka dist directory not found in $OutputDir"
+$DistDir = Join-Path $OutputDir "__main__.dist"
+$BuildExe = Join-Path $DistDir "termi-word.exe"
+if (-not (Test-Path -LiteralPath $BuildExe)) {
+    throw "未找到编译产物: $BuildExe"
 }
 
-$ImportsDir = Join-Path $DistDir.FullName "data/imports"
-New-Item -ItemType Directory -Force -Path $ImportsDir | Out-Null
+Write-Host "打包完成！产物路径: $DistDir"
+Write-Host "可执行文件: $BuildExe"
 
-$SourceDataDir = Join-Path $ProjectRoot "data"
-if (Test-Path -LiteralPath $SourceDataDir) {
-    Get-ChildItem -LiteralPath $SourceDataDir -Filter "*.csv" -File |
-        Copy-Item -Destination $ImportsDir -Force
-}
-
-Write-Host "Built: $($DistDir.FullName)"
-Write-Host "External import directory: $ImportsDir"
-Write-Host "Package workspace: $PackageRoot"

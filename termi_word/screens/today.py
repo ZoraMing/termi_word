@@ -28,6 +28,10 @@ class TodayScreen(Screen):
         ("6", "settings", "设置参数"),
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.confirm_study_needed = False
+
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
             yield Static(id="content-area")
@@ -38,6 +42,7 @@ class TodayScreen(Screen):
         self.refresh_summary()
 
     def on_screen_resume(self) -> None:
+        self.confirm_study_needed = False
         self.refresh_summary()
 
     def on_key(self, event: Key) -> None:
@@ -65,6 +70,8 @@ class TodayScreen(Screen):
         action = actions.get(event.key)
         if action is not None:
             event.stop()
+            if event.key != shortcuts["study"]:
+                self.confirm_study_needed = False
             action()
             return
 
@@ -132,6 +139,9 @@ class TodayScreen(Screen):
             
             # 剩余新词数
             remaining = repo.remaining_new_count(deck.id) if deck else 0
+            
+            # 待复习词数
+            due_count = len(repo.due_cards(deck.id)) if deck else 0
 
         # 精确格式化核心静态字符画，自适应宽度
         title_fill = " " * max(1, width - display_width("Termi Word") - display_width("? 展示帮助") - 2)
@@ -142,9 +152,17 @@ class TodayScreen(Screen):
             f"每轮配置：新词 {setting.daily_new_target:<3} 复习 {setting.review_soft_limit:<3}   今日计划：拼写 {setting.daily_spelling_target:<3}",
             f"当前完成：新词 [#F59E0B]{new_done:<2}[/]  复习 [#00D4AA]{rev_done:<3}[/]  拼写 [#00D4AA]{spelled:<3}[/]  连续打卡 [#4ADE80]{streak:<2}[/] 天",
             f"坚持计划：剩余新词数 {remaining:<5}",
+        ]
+
+        if due_count > 0:
+            lines.append(f"⚠ [#7a818d]温馨提示：今日有 {due_count} 个单词待复习，建议先 [复习] 巩固记忆！[/]")
+        else:
+            lines.append("")
+
+        lines.extend([
             rule(width=width),
             format_home_menu(shortcuts),
-        ]
+        ])
 
         self.query_one("#content-area", Static).update(
             render_content_block(lines, height=content_height, width=width)
@@ -164,6 +182,20 @@ class TodayScreen(Screen):
 
     # 快捷键动作分发
     def action_study(self) -> None:
+        with self.app.session_factory() as session:
+            repo = AppRepository(session)
+            deck = repo.active_deck()
+            due_count = len(repo.due_cards(deck.id)) if deck else 0
+
+        if due_count > 0 and not self.confirm_study_needed:
+            self.confirm_study_needed = True
+            msg_widget = self.query_one("#message-area", Static)
+            msg_widget.remove_class("success", "error")
+            msg_widget.add_class("muted")
+            msg_widget.update(f"提示：今日有 {due_count} 个待复习单词。建议先按 [2] 进行复习。再次按 [1] 可强行开始学习。")
+            return
+
+        self.confirm_study_needed = False
         self.app.start_study("mixed")
 
     def action_review_only(self) -> None:

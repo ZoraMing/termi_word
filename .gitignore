@@ -7,12 +7,25 @@ dist/
 *.build/
 *.dist/
 *.onefile-build/
+.nuitka-package/
 
-# Local databases
+# Local databases and runtime data
 *.db
 *.sqlite3
+termi_data/
+data/
 
 # Logs and config files
 *.log
+setting.json
 ui_config.json
 local_time.json
+paths.json
+
+# Nuitka crash reports
+nuitka-crash-report.xml
+
+# Development docs (not for distribution)
+DESIGN.md
+DIAGNOSE.md
+PRODUCT.md

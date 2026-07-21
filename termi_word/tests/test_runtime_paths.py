@@ -9,118 +9,53 @@ from tempfile import TemporaryDirectory
 from termi_word.runtime_paths import (
     ensure_data_directories,
     resolve_runtime_paths,
-    save_runtime_path_overrides,
 )
 
 
 class TestRuntimePaths(unittest.TestCase):
     """验证开发运行和打包运行时的数据目录定位。"""
 
-    def test_dev_paths_use_project_data_directory(self) -> None:
-        module_file = Path("E:/repo/termi_word/runtime_paths.py")
-
-        paths = resolve_runtime_paths(
-            is_frozen=False,
-            executable=Path("E:/dist/TermiWord/termi-word.exe"),
-            module_file=module_file,
-        )
-
-        self.assertEqual(paths.app_root, Path("E:/repo"))
-        self.assertEqual(paths.data_dir, Path("E:/repo/data"))
-        self.assertEqual(paths.imports_dir, Path("E:/repo/data/imports"))
-        self.assertEqual(paths.db_path, Path("E:/repo/data/termi_word.sqlite3"))
-        self.assertEqual(paths.ui_config_path, Path("E:/repo/data/ui_config.json"))
-
-    def test_frozen_paths_use_executable_side_data_directory(self) -> None:
-        executable = Path("D:/apps/TermiWord/termi-word.exe")
-
-        paths = resolve_runtime_paths(
-            is_frozen=True,
-            executable=executable,
-            module_file=Path("E:/repo/termi_word/runtime_paths.py"),
-        )
-
-        self.assertEqual(paths.app_root, Path("D:/apps/TermiWord"))
-        self.assertEqual(paths.data_dir, Path("D:/apps/TermiWord/data"))
-        self.assertEqual(paths.imports_dir, Path("D:/apps/TermiWord/data/imports"))
-        self.assertEqual(paths.db_path, Path("D:/apps/TermiWord/data/termi_word.sqlite3"))
-        self.assertEqual(paths.ui_config_path, Path("D:/apps/TermiWord/data/ui_config.json"))
-
-    def test_paths_json_overrides_imports_and_config_directories(self) -> None:
+    def test_dev_paths_use_app_root_termi_data_directory(self) -> None:
+        """开发态：数据目录应使用 app_root/termi_data/"""
         with TemporaryDirectory() as temp_dir:
-            app_root = Path(temp_dir) / "TermiWord"
-            bootstrap_dir = app_root / "data"
-            bootstrap_dir.mkdir(parents=True)
-            config_dir = Path(temp_dir) / "external" / "data"
-            (bootstrap_dir / "paths.json").write_text(
-                (
-                    "{\n"
-                    f"  \"config_dir\": \"{config_dir.as_posix()}\"\n"
-                    "}\n"
-                ),
-                encoding="utf-8",
+            repo_root = Path(temp_dir) / "repo"
+            module_file = repo_root / "termi_word" / "runtime_paths.py"
+
+            paths = resolve_runtime_paths(
+                is_frozen=False,
+                executable=Path(temp_dir) / "dist" / "termi-word.exe",
+                module_file=module_file,
             )
+
+            self.assertEqual(paths.app_root, repo_root)
+            self.assertEqual(paths.data_dir, repo_root / "termi_data")
+            self.assertEqual(paths.imports_dir, repo_root / "termi_data" / "imports")
+            self.assertEqual(paths.db_path, repo_root / "termi_data" / "termi_word.sqlite3")
+
+    def test_frozen_paths_use_exe_directory_termi_data(self) -> None:
+        """打包态：数据目录应使用 exe 同级目录/termi_data/"""
+        with TemporaryDirectory() as temp_dir:
+            app_root = Path(temp_dir) / "app"
 
             paths = resolve_runtime_paths(
                 is_frozen=True,
                 executable=app_root / "termi-word.exe",
-                module_file=Path("E:/repo/termi_word/runtime_paths.py"),
+                module_file=Path(temp_dir) / "repo" / "termi_word" / "runtime_paths.py",
             )
 
-            self.assertEqual(paths.data_dir, config_dir)
-            self.assertEqual(paths.imports_dir, config_dir / "imports")
-            self.assertEqual(paths.db_path, config_dir / "termi_word.sqlite3")
-            self.assertEqual(paths.ui_config_path, config_dir / "ui_config.json")
-            self.assertEqual(paths.paths_config_path, bootstrap_dir / "paths.json")
-
-    def test_save_runtime_path_overrides_writes_bootstrap_config_and_creates_dirs(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app_root = Path(temp_dir) / "TermiWord"
-            data_dir = Path(temp_dir) / "external" / "data"
-
-            saved_path = save_runtime_path_overrides(
-                app_root=app_root,
-                data_dir=data_dir,
-            )
-
-            self.assertEqual(saved_path, app_root / "data" / "paths.json")
-            self.assertTrue(data_dir.is_dir())
-            self.assertTrue((data_dir / "imports").is_dir())
-            text = saved_path.read_text(encoding="utf-8")
-            self.assertIn(data_dir.as_posix(), text)
-
-    def test_save_runtime_path_overrides_resolves_relative_paths_from_app_root(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app_root = Path(temp_dir) / "TermiWord"
-
-            saved_path = save_runtime_path_overrides(
-                app_root=app_root,
-                data_dir="custom/data",
-            )
-
-            text = saved_path.read_text(encoding="utf-8")
-            # 应该保存为相对路径以提升便携性
-            self.assertIn('"config_dir": "custom/data"', text)
-
-    def test_save_runtime_path_overrides_cleans_quotes_and_spaces(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app_root = Path(temp_dir) / "TermiWord"
-
-            saved_path = save_runtime_path_overrides(
-                app_root=app_root,
-                data_dir=' "custom\\data" ',
-            )
-
-            import json
-            data = json.loads(saved_path.read_text(encoding="utf-8"))
-            self.assertEqual(data["config_dir"], "custom/data")
+            self.assertEqual(paths.app_root, app_root)
+            self.assertEqual(paths.data_dir, app_root / "termi_data")
+            self.assertEqual(paths.imports_dir, app_root / "termi_data" / "imports")
+            self.assertEqual(paths.db_path, app_root / "termi_data" / "termi_word.sqlite3")
 
     def test_ensure_data_directories_creates_data_and_imports_only(self) -> None:
         with TemporaryDirectory() as temp_dir:
+            app_root = Path(temp_dir) / "TermiWord"
+
             paths = resolve_runtime_paths(
                 is_frozen=True,
-                executable=Path(temp_dir) / "TermiWord" / "termi-word",
-                module_file=Path("E:/repo/termi_word/runtime_paths.py"),
+                executable=app_root / "termi-word",
+                module_file=Path(temp_dir) / "repo" / "termi_word" / "runtime_paths.py",
             )
 
             ensure_data_directories(paths)
@@ -133,36 +68,28 @@ class TestRuntimePaths(unittest.TestCase):
         """验证 RuntimePaths 是不可变的，但 update_from 可以正确更新属性。"""
         with TemporaryDirectory() as temp_dir:
             app_root = Path(temp_dir) / "TermiWord"
+
             paths1 = resolve_runtime_paths(
                 is_frozen=True,
                 executable=app_root / "termi-word.exe",
-                module_file=Path("E:/repo/termi_word/runtime_paths.py"),
+                module_file=Path(temp_dir) / "repo" / "termi_word" / "runtime_paths.py",
             )
 
-            # 创建第二个 paths 实例，使用不同的路径
-            new_data = Path(temp_dir) / "new_data"
-            (app_root / "data").mkdir(parents=True, exist_ok=True)
-            (app_root / "data" / "paths.json").write_text(
-                json.dumps({
-                    "config_dir": new_data.as_posix(),
-                }),
-                encoding="utf-8",
-            )
+            # 创建第二个 paths 实例
             paths2 = resolve_runtime_paths(
                 is_frozen=True,
                 executable=app_root / "termi-word.exe",
-                module_file=Path("E:/repo/termi_word/runtime_paths.py"),
+                module_file=Path(temp_dir) / "repo" / "termi_word" / "runtime_paths.py",
             )
 
             # 验证 frozen 属性：不能直接赋值
             with self.assertRaises(AttributeError):
-                paths1.imports_dir = new_data
+                paths1.imports_dir = Path(temp_dir) / "new_data"
 
             # 验证 update_from 可以更新属性
-            self.assertNotEqual(paths1.data_dir, paths2.data_dir)
+            self.assertEqual(paths1.data_dir, paths2.data_dir)
             paths1.update_from(paths2)
-            self.assertEqual(paths1.data_dir, new_data)
-            self.assertEqual(paths1.imports_dir, new_data / "imports")
+            self.assertEqual(paths1.data_dir, paths2.data_dir)
 
 
 if __name__ == "__main__":

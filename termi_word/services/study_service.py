@@ -60,9 +60,13 @@ class StudyService:
             study_session = repo.open_session(deck.id, session_date)
             if study_session is not None:
                 queue_ids = SessionQueueIds.from_json(study_session.remaining_card_ids)
-                cards = repo.cards_by_ids(list(queue_ids.ids))
-                is_extra = study_session.session_type.startswith("extra_")
-                return StudyQueue(deck.id, cards, study_session.id, is_extra=is_extra)
+                if queue_ids.is_empty:
+                    study_session.status = 1
+                    session.commit()
+                else:
+                    cards = repo.cards_by_ids(list(queue_ids.ids))
+                    is_extra = study_session.session_type.startswith("extra_")
+                    return StudyQueue(deck.id, cards, study_session.id, is_extra=is_extra)
 
             # 2. 如果不存在，则根据配置构建全新队列
             due_cards = repo.due_cards(deck.id, setting.review_soft_limit if mode != "new" else 0)
@@ -78,13 +82,18 @@ class StudyService:
             if not mixed_cards:
                 is_extra = True
                 if mode == "new":
-                    mixed_cards = repo.new_cards(deck.id, limit=20)
+                    mixed_cards = repo.new_cards(deck.id, limit=setting.daily_new_target)
                 elif mode == "review":
-                    mixed_cards = self._get_future_due_cards(session, deck.id, limit=20)
+                    mixed_cards = self._get_future_due_cards(session, deck.id, limit=setting.daily_new_target)
                 else:  # mixed
-                    extra_new = repo.new_cards(deck.id, limit=10)
-                    extra_due = self._get_future_due_cards(session, deck.id, limit=10)
+                    half = max(1, setting.daily_new_target // 2)
+                    extra_new = repo.new_cards(deck.id, limit=half)
+                    extra_due = self._get_future_due_cards(session, deck.id, limit=half)
                     mixed_cards = self._mix_cards(extra_due, extra_new, setting.study_order)
+
+            # 如果没有卡片，不创建空的学习会话，直接返回空队列
+            if not mixed_cards:
+                return StudyQueue(deck.id, [], None, is_extra=is_extra)
 
             # 创建会话
             study_session = StudySession(

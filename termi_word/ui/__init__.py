@@ -142,8 +142,8 @@ def render_footer(text: str, width: int = PANEL_WIDTH, max_lines: int = 2) -> st
 
 
 def is_footer_visible(owner: object) -> bool:
-    """读取页面帮助栏可见状态；默认展开，避免隐藏已有提示。"""
-    return bool(getattr(owner, "_footer_visible", True))
+    """读取页面帮助栏可见状态；默认隐藏/关闭，按 ? 切换展示。"""
+    return bool(getattr(owner, "_footer_visible", False))
 
 
 def toggle_footer_visible(owner: object) -> bool:
@@ -246,7 +246,7 @@ class TermiScreen(Screen):
         self._last_message = ""
         self._last_footer = ""
         self._msg_severity = "info"
-        self._footer_visible = True
+        self._footer_visible = False
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):

@@ -156,8 +156,8 @@ class SpellingScreen(TermiScreen):
             self.refresh_ui(
                 header=f"{mode_label}  {progress}",
                 lines=visible,
-                message=self.last_msg or "请在输入框内键入单词拼写",
-                footer="Enter 提交判定  Tab 提示  Space 答案  s 跳过  Esc 返回"
+                message=self.last_msg or "",
+                footer="Enter 提交判定  Tab 提示  s 跳过  Esc 返回"
             )
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -293,7 +293,7 @@ class SpellingScreen(TermiScreen):
         try:
             words = await asyncio.to_thread(self.app.spelling_service.candidates)
             self.words = words
-            self.last_msg = "请在输入框内键入单词拼写"
+            self.last_msg = ""
         except Exception as exc:
             self.last_msg = f"加载词库失败: {exc}"
         finally:

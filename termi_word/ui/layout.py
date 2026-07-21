@@ -26,7 +26,7 @@ def compute_frame_layout(
     footer_text: str,
     has_input: bool = False,
     message_rows: int = 1,
-    footer_visible: bool = True,
+    footer_visible: bool = False,
 ) -> FrameLayout:
     """统一计算 Termi Word 界面的容器高度、内容宽度、页脚高度和主体高度。"""
     frame_height = panel_height(terminal_height, panel_min_height, panel_max_height)

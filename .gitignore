@@ -4,6 +4,10 @@ __pycache__
 tmp/
 build/
 dist/
+output/
+.venv*/
+cache/
+custom
 *.build/
 *.dist/
 *.onefile-build/

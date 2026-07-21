@@ -46,7 +46,7 @@ Write-Host "使用打包环境: $Python"
     --nofollow-import-to=nuitka `
     "$ProjectRoot/termi_word/__main__.py"
 
-$DistDir = Join-Path $OutputDir "__main__.dist"
+$DistDir = Join-Path $OutputDir "dist"
 $BuildExe = Join-Path $DistDir "termi-word.exe"
 if (-not (Test-Path -LiteralPath $BuildExe)) {
     throw "未找到编译产物: $BuildExe"
@@ -54,4 +54,14 @@ if (-not (Test-Path -LiteralPath $BuildExe)) {
 
 Write-Host "打包完成！产物路径: $DistDir"
 Write-Host "可执行文件: $BuildExe"
+
+# 自动打包压缩为 ZIP
+$ZipPath = Join-Path $OutputDir "termi_word_windows.zip"
+if (Test-Path -LiteralPath $ZipPath) {
+    Remove-Item -Force -LiteralPath $ZipPath
+}
+Write-Host "正在压缩为 ZIP 包: $ZipPath ..."
+Compress-Archive -Path "$DistDir\*" -DestinationPath $ZipPath -Force
+Write-Host "ZIP 压缩完成！文件路径: $ZipPath"
+
 

@@ -27,10 +27,10 @@ class RuntimePaths:
 
 
 def _get_real_exe_path() -> Path:
-    """获取真实 exe 路径，兼容 Nuitka standalone/onefile 和开发模式。"""
+    """获取真实 exe/二进制 路径，兼容 Nuitka standalone/onefile 和开发模式。"""
     # Nuitka standalone 模式：sys.executable 就是真实路径
     exe = Path(sys.executable).resolve()
-    if exe.suffix.lower() == ".exe" and exe.exists():
+    if exe.exists() and "python" not in exe.stem.lower():
         return exe
 
     # Nuitka onefile 模式：sys.executable 指向临时目录，用 NUITKA_ONEFILE_BINARY
@@ -42,7 +42,7 @@ def _get_real_exe_path() -> Path:
     # 备选：sys.argv[0]
     if sys.argv:
         argv0 = Path(sys.argv[0]).resolve()
-        if argv0.suffix.lower() == ".exe" and argv0.exists():
+        if argv0.exists() and "python" not in argv0.stem.lower():
             return argv0
 
     # 最后回退到 cwd
@@ -62,11 +62,12 @@ def resolve_runtime_paths(
     if is_frozen is not None:
         frozen = is_frozen
     else:
+        exe_stem = Path(sys.executable).stem.lower()
         frozen = (
             bool(getattr(sys, "frozen", False))
             or "__compiled__" in globals()
             or hasattr(sys, "__compiled__")
-            or (Path(sys.executable).suffix.lower() == ".exe" and "python" not in Path(sys.executable).stem.lower())
+            or "python" not in exe_stem
         )
 
     source_file = Path(module_file or __file__).resolve()

@@ -18,19 +18,20 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            asset_name: termi_word_amdx64.zip
+            asset_name: termi_word_windows_amd64.zip
             run_cmd: powershell ./scripts/build.ps1
-            built_file: output/termi_word_amdx64.zip
+            built_file: output/termi_word_windows.zip
 
           - os: ubuntu-latest
-            asset_name: termi_word_linux.tar.gz
+            asset_name: termi_word_linux_amd64.tar.gz
             run_cmd: bash ./scripts/build.sh
-            built_file: output/termi_word_linux.tar.gz
+            built_file: output/termi_word_linux_amd64.tar.gz
 
           - os: macos-latest
-            asset_name: termi_word_mac.tar.gz
+            asset_name: termi_word_mac_arm64.tar.gz
             run_cmd: bash ./scripts/build.sh
-            built_file: output/termi_word_mac.tar.gz
+            built_file: output/termi_word_mac_arm64.tar.gz
+
 
     steps:
       - name: Checkout Code

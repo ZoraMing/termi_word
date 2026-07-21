@@ -47,7 +47,7 @@ EXTRA_ARGS=""
     $EXTRA_ARGS \
     "$PROJECT_ROOT/termi_word/__main__.py"
 
-DIST_DIR="$OUTPUT_DIR/dist"
+DIST_DIR="$OUTPUT_DIR/__main__.dist"
 BUILD_EXE="$DIST_DIR/termi-word"
 if [ ! -f "$BUILD_EXE" ] && [ -f "$BUILD_EXE.exe" ]; then
     BUILD_EXE="$BUILD_EXE.exe"
@@ -61,14 +61,30 @@ fi
 echo "Built Standalone: $DIST_DIR"
 echo "Executable: $BUILD_EXE"
 
+# 自动获取 CPU 架构信息
+RAW_ARCH="$(uname -m)"
+case "$RAW_ARCH" in
+    x86_64|amd64)
+        ARCH_TAG="amd64"
+        ;;
+    aarch64|arm64)
+        ARCH_TAG="arm64"
+        ;;
+    *)
+        ARCH_TAG="$RAW_ARCH"
+        ;;
+esac
+
 if [ "$(uname)" = "Darwin" ]; then
-    ARCHIVE_PATH="$OUTPUT_DIR/termi_word_mac.tar.gz"
+    ARCHIVE_PATH="$OUTPUT_DIR/termi_word_mac_${ARCH_TAG}.tar.gz"
 else
-    ARCHIVE_PATH="$OUTPUT_DIR/termi_word_linux.tar.gz"
+    ARCHIVE_PATH="$OUTPUT_DIR/termi_word_linux_${ARCH_TAG}.tar.gz"
 fi
 
+echo "Detected Architecture: $ARCH_TAG ($RAW_ARCH)"
 echo "Compressing into $ARCHIVE_PATH ..."
 tar -czvf "$ARCHIVE_PATH" -C "$DIST_DIR" .
 echo "Package compressed successfully: $ARCHIVE_PATH"
+
 
 

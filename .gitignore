@@ -1,5 +1,6 @@
 __pycache__
-.*
+
+!.github
 
 tmp/
 build/
@@ -33,3 +34,7 @@ nuitka-crash-report.xml
 DESIGN.md
 DIAGNOSE.md
 PRODUCT.md
+.agents
+.codex
+.claude
+.impeccable

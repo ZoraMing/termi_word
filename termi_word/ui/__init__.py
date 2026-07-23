@@ -5,10 +5,12 @@ import unicodedata
 
 from rich.text import Text
 
-PANEL_WIDTH = 68  # 内容区域标准显示宽度（除去外边框占用的宽度）
-PANEL_HEIGHT = 12
-MIN_PANEL_HEIGHT = 6
-MAX_PANEL_HEIGHT = 16
+from termi_word.config import (
+    DEFAULT_PANEL_WIDTH as PANEL_WIDTH,
+    DEFAULT_PANEL_HEIGHT as PANEL_HEIGHT,
+    DEFAULT_PANEL_MIN_HEIGHT as MIN_PANEL_HEIGHT,
+    DEFAULT_PANEL_MAX_HEIGHT as MAX_PANEL_HEIGHT,
+)
 
 
 def display_width(text: str) -> int:

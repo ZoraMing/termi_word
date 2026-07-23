@@ -9,6 +9,13 @@ from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Input, Static
 
+from termi_word.config import (
+    DEFAULT_PANEL_MIN_HEIGHT,
+    DEFAULT_PANEL_MAX_HEIGHT,
+    PANEL_MIN_HEIGHT_RANGE,
+    PANEL_MAX_HEIGHT_RANGE,
+    PANEL_MAX_WIDTH_RANGE,
+)
 from termi_word.database.repositories import AppRepository
 from termi_word.services.home_shortcut_service import (
     HOME_ACTIONS,
@@ -204,7 +211,7 @@ class SettingsScreen(Screen):
         if self.last_msg_severity != "info":
             msg_widget.add_class(self.last_msg_severity)
 
-        msg_widget.update(self.last_msg or "按 ↑↓ 选择字段，Enter/Space 修改或切换")
+        msg_widget.update(self.last_msg or "↑↓ 选择字段   Space 选中/切换   Enter 确认")
         footer_output = render_footer(footer_text, width) if is_footer_visible(self) else ""
         footer_widget.update(footer_output)
 
@@ -264,7 +271,12 @@ class SettingsScreen(Screen):
             self.render_settings()
             return
 
-        if key in ("enter", "space"):
+        if key == "space":
+            event.stop()
+            self._activate_field()
+            return
+
+        if key == "enter":
             event.stop()
             self._activate_field()
             return
@@ -293,17 +305,17 @@ class SettingsScreen(Screen):
         inp.display = True
         if kind == "timezone":
             inp.value = format_offset(int(self.values[key]))
-            self.last_msg = f"正在修改【{label}】，格式示例: +08:00 或 -05:00"
+            self.last_msg = f"正在修改【{label}】，示例: +08:00，按 Enter 确认"
         elif kind == "home_key":
             inp.value = str(self.values[key])
-            self.last_msg = f"正在修改【{label}】，不可与其他首页快捷键或全局搜索重复"
+            self.last_msg = f"正在修改【{label}】，按 Enter 确认"
         elif kind == "text":
             friendly = self.FRIENDLY_SHORTCUTS.get(str(self.values[key]), str(self.values[key]))
             inp.value = friendly
-            self.last_msg = f"正在修改【{label}】，可选: Ctrl+/ Ctrl+P Ctrl+S Ctrl+F Ctrl+K Ctrl+Q"
+            self.last_msg = f"正在修改【{label}】，可选: Ctrl+/ Ctrl+P 等，按 Enter 确认"
         else:
             inp.value = str(self.values[key])
-            self.last_msg = f"正在修改【{label}】数值"
+            self.last_msg = f"正在修改【{label}】数值，按 Enter 确认"
         self.last_msg_severity = "info"
         inp.cursor_position = len(inp.value)
         inp.focus()
@@ -340,18 +352,18 @@ class SettingsScreen(Screen):
                 if val < 0:
                     raise ValueError("数值不能为负数")
 
-                # 宽高设置边界校验
-                if key == "panel_min_height" and not (3 <= val <= 16):
-                    raise ValueError("最小高度范围为 3-16")
-                if key == "panel_max_height" and not (6 <= val <= 16):
-                    raise ValueError("最大高度范围为 6-16")
-                if key == "panel_max_width" and val < 20:
-                    raise ValueError("最大宽度不能小于 20")
+                # 宽高设置边界校验（统一使用 config.py 常量）
+                if key == "panel_min_height" and not (PANEL_MIN_HEIGHT_RANGE[0] <= val <= PANEL_MIN_HEIGHT_RANGE[1]):
+                    raise ValueError(f"最小高度范围为 {PANEL_MIN_HEIGHT_RANGE[0]}-{PANEL_MIN_HEIGHT_RANGE[1]}")
+                if key == "panel_max_height" and not (PANEL_MAX_HEIGHT_RANGE[0] <= val <= PANEL_MAX_HEIGHT_RANGE[1]):
+                    raise ValueError(f"最大高度范围为 {PANEL_MAX_HEIGHT_RANGE[0]}-{PANEL_MAX_HEIGHT_RANGE[1]}")
+                if key == "panel_max_width" and not (PANEL_MAX_WIDTH_RANGE[0] <= val <= PANEL_MAX_WIDTH_RANGE[1]):
+                    raise ValueError(f"最大宽度范围为 {PANEL_MAX_WIDTH_RANGE[0]}-{PANEL_MAX_WIDTH_RANGE[1]}")
 
                 # 校验最小高度不能大于最大高度
                 temp_values = {**self.values, key: val}
-                min_h = temp_values.get("panel_min_height", 6)
-                max_h = temp_values.get("panel_max_height", 16)
+                min_h = temp_values.get("panel_min_height", DEFAULT_PANEL_MIN_HEIGHT)
+                max_h = temp_values.get("panel_max_height", DEFAULT_PANEL_MAX_HEIGHT)
                 if min_h > max_h:
                     raise ValueError("最小高度不能大于最大高度")
 

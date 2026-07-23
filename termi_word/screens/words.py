@@ -414,8 +414,22 @@ class WordsScreen(Screen):
                 self.render_words()
             return
 
-        # 6. 回车/空格 锁定/解锁 详情展现
-        if key in ("enter", "space"):
+        # 6. 空格选中/切换详情展开，回车确认锁定
+        if key == "space":
+            event.stop()
+            if inp.has_focus:
+                inp.blur()
+                self.focus()
+                self.detail_selected = True
+                self.detail_scroll_y = 0
+            else:
+                self.detail_selected = not self.detail_selected
+                if not self.detail_selected:
+                    self.detail_scroll_y = 0
+            self.render_words()
+            return
+
+        if key == "enter":
             event.stop()
             if inp.has_focus:
                 inp.blur()

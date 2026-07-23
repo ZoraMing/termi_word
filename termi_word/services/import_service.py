@@ -61,34 +61,46 @@ class ImportService:
         if not csv_to_use.exists():
             return csv_to_use, [], ()
 
-        # 从数据库加载映射关系
-        column_mapping = {}
+        # 从数据库加载映射关系（支持按词书名隔离开存）
+        column_mapping: dict[str, str] = {}
         try:
             with self.session_factory() as session:
                 s = AppRepository(session).get_settings()
                 if s.csv_column_mapping:
-                    column_mapping = json.loads(s.csv_column_mapping)
+                    raw_mapping = json.loads(s.csv_column_mapping)
+                    if isinstance(raw_mapping, dict):
+                        if deck_name in raw_mapping and isinstance(raw_mapping[deck_name], dict):
+                            column_mapping = raw_mapping[deck_name]
+                        elif any(k in CSV_FIELDS for k in raw_mapping):
+                            # 旧版全局字典格式
+                            column_mapping = raw_mapping
         except Exception:
-            pass
-
-        # 默认没有映射的退回到原样字段名
+            pass 
+        # 补全未在配置中的字段为默认同名字段（已显式绑为 "" 的保留 ""）
+        final_mapping: dict[str, str] = {}
         for field in CSV_FIELDS:
-            if field not in column_mapping or not column_mapping[field]:
-                column_mapping[field] = field
+            if field not in column_mapping:
+                final_mapping[field] = field
+            else:
+                final_mapping[field] = column_mapping[field]
 
         with csv_to_use.open("r", encoding="utf-8-sig", newline="") as file:
             reader = csv.DictReader(file)
-            # 校验 CSV 是否包含我们绑定映射指向的那个 CSV 列名
+            headers = reader.fieldnames or []
+            # 校验 CSV 是否包含我们绑定映射指向的那个 CSV 列名（绑为 "" 未绑定的跳过校验）
             missing = tuple(
                 field for field in CSV_FIELDS 
-                if column_mapping[field] not in (reader.fieldnames or [])
+                if final_mapping[field] != "" and final_mapping[field] not in headers
             )
             if missing:
                 return csv_to_use, [], missing
             rows = [
                 ImportRow(
                     row_number=index,
-                    values={field: (row.get(column_mapping[field]) or "").strip() for field in CSV_FIELDS},
+                    values={
+                        field: (row.get(final_mapping[field]) or "").strip() if final_mapping[field] else ""
+                        for field in CSV_FIELDS
+                    },
                 )
                 for index, row in enumerate(reader, start=1)
             ]

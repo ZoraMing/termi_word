@@ -7,27 +7,28 @@ import json
 from pathlib import Path
 
 from textual.app import ComposeResult
+from textual.containers import Horizontal
 from textual.events import Key
 from textual.screen import Screen
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
 IMPORTS_DIR = None
 
 from termi_word.database.repositories import AppRepository
 from termi_word.domain.results import ImportResult
 from termi_word.services.import_service import ImportRow, ImportService
-from termi_word.ui.messages import format_import_result
-from termi_word.ui.layout import compute_frame_layout
 from termi_word.ui import (
+    field_row,
     is_footer_visible,
     render_content_block,
     render_footer,
-    field_row,
     rule,
-    toggle_footer_visible,
     safe_register_worker,
     safe_unregister_worker,
+    toggle_footer_visible,
 )
+from termi_word.ui.layout import compute_frame_layout
+from termi_word.ui.messages import format_import_result
 
 CSV_FIELDS = ["w", "zh", "en", "us", "c", "core", "ex", "exz"]
 FIELD_LABELS = {
@@ -40,6 +41,7 @@ FIELD_LABELS = {
     "ex": "例句映射(ex)",
     "exz": "翻译映射(exz)",
 }
+
 
 class DeckConfigScreen(Screen):
     """词书管理与列名绑定二级页面"""
@@ -55,79 +57,63 @@ class DeckConfigScreen(Screen):
     def __init__(self) -> None:
         super().__init__()
         self.selected = 0
+        self.editing = False
         self.last_msg = ""
         self.last_msg_severity = "info"
         self.csv_files: list[str] = []
-        self.csv_headers: list[str] = ["(未绑定)"]
+        self.csv_headers: list[str] = []
         self.active_deck_name = "无"
         self.mapping: dict[str, str] = {}
         self.is_busy = False
         self._save_worker = None
-        
-        # 页面列表的行定义：(动作类型, 标签, 值)
-        self.items: list[tuple[str, str, str]] = []
-        self.pending_action = None
-        self._pending_deck_key = ""
-        self._pending_mapping_key = ""
-        self._pending_mapping_label = ""
         self._import_worker = None
         self._is_importing = False
+
+        # 页面列表的行定义：(动作类型, 标签, 值)
+        self.items: list[tuple[str, str, str]] = []
 
     def compose(self) -> ComposeResult:
         with Static(classes="frame-container"):
             yield Static(id="content-area")
+            with Horizontal(classes="input-row"):
+                yield Static("> ", classes="input-prefix")
+                yield Input(id="deck-config-input", placeholder="输入期望映射的 CSV 列名...")
             yield Static(id="message-area")
             yield Static(id="footer-area")
 
     def on_mount(self) -> None:
+        self._footer_visible = True
+        self.query_one("#deck-config-input", Input).display = False
+        self.query_one(".input-row", Horizontal).display = False
         self.scan_csv_files()
         self.load_config()
         self.render_panel()
+        self.focus()
 
     def on_key(self, event: Key) -> None:
-        # 无条件放行全局搜索快捷键，避免被页面内 Key 消费吞掉
+        # 无条件放行全局搜索快捷键
         if self.app.is_search_shortcut(event.key):
             event.stop()
             self.app.open_search()
+            return
+
+        key = event.key
+
+        # 如果当前正在编辑输入框
+        if self.editing:
+            if key == "escape":
+                event.stop()
+                self._close_editor()
+                self.last_msg = "已取消编辑。"
+                self.last_msg_severity = "muted"
+                self.render_panel()
             return
 
         if self.is_busy:
             event.stop()
             return
 
-        key = event.key
-
-        # 如果当前有挂起的二次确认动作
-        if self.pending_action is not None:
-            if key == self.pending_action.confirm_key:
-                event.stop()
-                action = self.pending_action.action
-                self.pending_action = None
-                
-                # 执行挂起的真实动作
-                if action == "sync_deck":
-                    self.active_deck_name = self._pending_deck_key.split(":", 1)[1]
-                    self._do_sync_deck()
-                elif action == "change_mapping":
-                    self._do_change_mapping()
-                elif action == "execute_import":
-                    self.last_msg = "正在同步词包数据中..."
-                    self.render_panel()
-                    self.start_csv_import()
-
-                return
-            elif key == self.pending_action.cancel_key:
-                event.stop()
-                self.pending_action = None
-                self.last_msg = "已取消操作。"
-                self.last_msg_severity = "muted"
-                self.render_panel()
-                return
-            else:
-                event.stop()
-                return
-
-        # 拦截全局 escape 以便退回
+        # 普通浏览模式快捷键
         if key == "escape":
             event.stop()
             self.action_back()
@@ -139,7 +125,22 @@ class DeckConfigScreen(Screen):
             self.render_panel()
             return
 
-        if key in ("enter", "space"):
+        if key in ("up", "k"):
+            event.stop()
+            self.action_prev_field()
+            return
+
+        if key in ("down", "j"):
+            event.stop()
+            self.action_next_field()
+            return
+
+        if key == "space":
+            event.stop()
+            self.action_select()
+            return
+
+        if key == "enter":
             event.stop()
             self.action_select()
             return
@@ -163,57 +164,42 @@ class DeckConfigScreen(Screen):
             repo = AppRepository(session)
             setting = repo.get_settings()
             deck = repo.active_deck()
-            
-            # 加载当前激活词书名称
+
             if deck:
                 self.active_deck_name = f"{deck.name}.csv"
             elif self.csv_files:
                 self.active_deck_name = self.csv_files[0]
-                # 写入数据库默认活跃词书
                 db_deck = repo.get_or_create_deck(Path(self.active_deck_name).stem)
                 setting.active_deck_id = db_deck.id
                 session.commit()
             else:
                 self.active_deck_name = "无可用CSV"
 
-            # 加载映射关系
+            # 加载按词书划分的专属映射关系
             self.mapping = {}
             if setting.csv_column_mapping:
                 try:
-                    self.mapping = json.loads(setting.csv_column_mapping)
+                    loaded = json.loads(setting.csv_column_mapping)
+                    deck_stem = Path(self.active_deck_name).stem
+                    if isinstance(loaded, dict):
+                        if deck_stem in loaded and isinstance(loaded[deck_stem], dict):
+                            self.mapping = loaded[deck_stem]
+                        elif any(k in CSV_FIELDS for k in loaded):
+                            self.mapping = loaded
                 except Exception:
                     pass
             for f in CSV_FIELDS:
                 if f not in self.mapping:
-                    self.mapping[f] = f  # 默认回退为标准字段
+                    self.mapping[f] = f
 
-            # 加载展示开关
             self.show_us = bool(setting.show_us)
             self.show_en = bool(setting.show_en)
             self.show_examples = bool(setting.show_examples)
 
-        # 读取当前 CSV 文件的 Headers
-        self.csv_headers = ["(未绑定)"]
-        if self.active_deck_name != "无可用CSV":
-            path = IMPORTS_DIR
-            if path is None:
-                from termi_word.config import IMPORTS_DIR as cfg_imports_dir
-                path = cfg_imports_dir
-            csv_path = path / self.active_deck_name
-            if csv_path.exists():
-                try:
-                    with csv_path.open("r", encoding="utf-8-sig") as f:
-                        reader = csv.reader(f)
-                        first_row = next(reader)
-                        if first_row:
-                            self.csv_headers.extend([h.strip() for h in first_row if h.strip()])
-                except Exception:
-                    pass
-
         self.rebuild_items()
 
     def rebuild_items(self) -> None:
-        """重构显示行"""
+        """重构显示行列表"""
         self.items = [
             ("status", "当前使用", self.active_deck_name),
         ]
@@ -224,22 +210,20 @@ class DeckConfigScreen(Screen):
 
         self.items.append(("execute_import", "同步当前词书", "按 Enter 导入/更新数据库"))
 
-        # 高级项保留在词书选择之后，避免干扰主流程
         for f in CSV_FIELDS:
             self.items.append((f"map_{f}", FIELD_LABELS[f], self.mapping.get(f) or "(未绑定)"))
-        
-        # 添加展示项
+
         self.items.append(("show_us", "显示音标", "是" if self.show_us else "否"))
         self.items.append(("show_en", "显示英文", "是" if self.show_en else "否"))
         self.items.append(("show_examples", "显示例句", "是" if self.show_examples else "否"))
         self.selected = min(self.selected, max(0, len(self.items) - 1))
-        
+
     def apply_dynamic_layout(self, footer_text: str = "") -> tuple[int, int]:
         setting = getattr(self.app, "settings", None)
         if setting is None:
             with self.app.session_factory() as session:
                 setting = AppRepository(session).get_settings()
-        
+
         layout = compute_frame_layout(
             terminal_width=self.size.width,
             terminal_height=self.size.height,
@@ -247,54 +231,53 @@ class DeckConfigScreen(Screen):
             panel_max_height=setting.panel_max_height,
             panel_max_width=setting.panel_max_width,
             footer_text=footer_text,
-            has_input=False,
+            has_input=self.editing,
             message_rows=1,
             footer_visible=is_footer_visible(self),
         )
-        
+
         container = self.query_one(".frame-container", Static)
         container.styles.height = layout.frame_height
         container.styles.min_height = layout.frame_height
         container.styles.max_height = layout.frame_height
         container.styles.width = layout.frame_width
-        
+
         self.query_one("#footer-area", Static).styles.height = layout.footer_rows
 
         content = self.query_one("#content-area", Static)
         content.styles.height = layout.content_height
         content.styles.min_height = layout.content_height
         content.styles.max_height = layout.content_height
-        
+
         return layout.content_height, layout.content_width
 
     def on_resize(self) -> None:
-        """窗口缩放事件，重新刷新渲染页面。"""
         self.render_panel()
 
     def render_panel(self) -> None:
         """根据当前配置渲染面板"""
-        footer_text = "↑↓ 选择   Enter 启用/同步   词书位置: termi_data/imports/   Esc 返回"
+        footer_text = "↑↓ 选择   Space 选中修改   Enter 确认/同步   Esc 返回"
         content_height, width = self.apply_dynamic_layout(footer_text)
         content_widget = self.query_one("#content-area", Static)
         msg_widget = self.query_one("#message-area", Static)
         footer_widget = self.query_one("#footer-area", Static)
 
-        title = "词书配置 / 编辑中" if self.pending_action is not None else "词书配置 / 浏览"
+        title = "词书配置 / 编辑中" if self.editing else "词书配置 / 浏览"
         eff_height = max(1, content_height - 2)
 
-        # 向上/下滚动裁剪计算
         start_idx = 0
         if self.selected >= eff_height:
             start_idx = self.selected - eff_height + 1
-        
+
         body_lines = []
         for index in range(start_idx, min(len(self.items), start_idx + eff_height)):
             key, label, val_str = self.items[index]
             is_sel = index == self.selected
+            is_edit = self.editing and is_sel
             if key.startswith("deck:") and label == self.active_deck_name:
                 label = f"* {label}"
             body_lines.append(
-                field_row(label, val_str, selected=is_sel, editing=False, width=16)
+                field_row(label, val_str, selected=is_sel, editing=is_edit, width=16)
             )
 
         while len(body_lines) < eff_height:
@@ -302,8 +285,7 @@ class DeckConfigScreen(Screen):
 
         lines = [title, rule(width=width)] + body_lines
         content_widget.update(render_content_block(lines, height=content_height, width=width))
-        
-        # 动态更新消息颜色类
+
         msg_widget.remove_class("success", "error", "muted")
         if self.last_msg_severity != "info":
             msg_widget.add_class(self.last_msg_severity)
@@ -321,6 +303,9 @@ class DeckConfigScreen(Screen):
         self.render_panel()
 
     def action_back(self) -> None:
+        if self.editing:
+            self._close_editor()
+            return
         self._cancel_workers()
         self.app.pop_screen()
 
@@ -330,16 +315,14 @@ class DeckConfigScreen(Screen):
     def action_select(self) -> None:
         """用户确认或修改某项"""
         key, label, val_str = self.items[self.selected]
-        
+
         if key == "status":
             self.last_msg = f"当前正在使用：{self.active_deck_name}"
             self.last_msg_severity = "info"
             self.render_panel()
             return
 
-        from termi_word.ui.keyboard import PendingConfirmation, HIGH_IMPACT_ACTIONS
-
-        # 1. 明确选择词书
+        # 1. 切换选择词书
         if key.startswith("deck:"):
             deck_name = key.split(":", 1)[1]
             if deck_name == self.active_deck_name:
@@ -347,27 +330,14 @@ class DeckConfigScreen(Screen):
                 self.last_msg_severity = "info"
                 self.render_panel()
                 return
-            self._pending_deck_key = key
-            self.pending_action = PendingConfirmation(
-                action="sync_deck",
-                prompt=HIGH_IMPACT_ACTIONS["sync_deck"]
-            )
-            self.last_msg = self.pending_action.prompt
-            self.last_msg_severity = "info"
-            self.render_panel()
+            self.active_deck_name = deck_name
+            self._do_sync_deck()
             return
 
-        # 2. 字段映射绑定
+        # 2. 映射关系：打开 Input 输入框编辑列名
         if key.startswith("map_"):
-            self._pending_mapping_key = key
-            self._pending_mapping_label = label
-            self.pending_action = PendingConfirmation(
-                action="change_mapping",
-                prompt=HIGH_IMPACT_ACTIONS["change_mapping"]
-            )
-            self.last_msg = self.pending_action.prompt
-            self.last_msg_severity = "info"
-            self.render_panel()
+            field_name = key[4:]
+            self._open_editor(field_name, label)
             return
 
         # 3. 字段可见性控制
@@ -377,17 +347,88 @@ class DeckConfigScreen(Screen):
 
         # 4. 执行数据同步导入
         if key == "execute_import":
-            self.pending_action = PendingConfirmation(
-                action="execute_import",
-                prompt=HIGH_IMPACT_ACTIONS["sync_deck"]
-            )
-            self.last_msg = self.pending_action.prompt
-            self.last_msg_severity = "info"
+            self.last_msg = "正在同步词包数据中..."
             self.render_panel()
+            self.start_csv_import()
             return
 
+    def _open_editor(self, field_name: str, label: str) -> None:
+        """打开 Input 编辑模式以修改自定义映射列名"""
+        self.editing = True
+        inp_row = self.query_one(".input-row", Horizontal)
+        inp = self.query_one("#deck-config-input", Input)
+
+        current_val = self.mapping.get(field_name) or ""
+        inp.value = current_val
+        self.last_msg = f"正在修改【{label}】映射的 CSV 列名（为空留空表示未绑定）"
+        self.last_msg_severity = "info"
+
+        self.render_panel()
+
+        inp_row.display = True
+        inp.display = True
+        inp.cursor_position = len(inp.value)
+        inp.focus()
+        self.render_panel()
+
+    def _close_editor(self) -> None:
+        """关闭 Input 输入框恢复浏览模式"""
+        self.editing = False
+        try:
+            self.query_one("#deck-config-input", Input).display = False
+            self.query_one(".input-row", Horizontal).display = False
+        except Exception:
+            pass
+        self.focus()
+        self.render_panel()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """提交输入的 CSV 列名"""
+        if event.input.id != "deck-config-input":
+            return
+
+        key, label, _ = self.items[self.selected]
+        if not key.startswith("map_"):
+            self._close_editor()
+            return
+
+        field_name = key[4:]
+        new_val = event.value.strip()
+
+        old_val = self.mapping.get(field_name)
+        self.mapping[field_name] = new_val
+        self._do_save_mapping(field_name, label, old_val)
+        self._close_editor()
+
+    def _do_save_mapping(self, field_name: str, label: str, old_val: str | None) -> None:
+        """保存更新后的映射至 SQLite 数据库"""
+        self.is_busy = True
+        self.last_msg = "正在保存映射配置..."
+        self.last_msg_severity = "info"
+        self.render_panel()
+        self._save_worker = self.run_worker(self._async_save_mapping(field_name, label, old_val), exclusive=True)
+        safe_register_worker(self, self._save_worker)
+
+    async def _async_save_mapping(self, field_name: str, label: str, old_val: str | None) -> None:
+        try:
+            await asyncio.to_thread(self._save_mapping_db)
+            self.rebuild_items()
+            val_display = self.mapping.get(field_name) or "(未绑定)"
+            self.last_msg = f"已将【{label}】映射设置为 CSV 列: {val_display}"
+            self.last_msg_severity = "success"
+        except Exception as exc:
+            self.mapping[field_name] = old_val or ""
+            self.last_msg = f"保存映射失败: {exc}"
+            self.last_msg_severity = "error"
+        finally:
+            self.is_busy = False
+            safe_unregister_worker(self, self._save_worker)
+            self._save_worker = None
+            if getattr(self, "is_mounted", True):
+                self.render_panel()
+
     def start_csv_import(self) -> None:
-        """启动词书同步 worker，并阻止重复导入。"""
+        """启动词书同步 worker"""
         if self._is_importing:
             self.last_msg = "词书同步正在进行中，请稍候。"
             self.last_msg_severity = "info"
@@ -397,10 +438,8 @@ class DeckConfigScreen(Screen):
         self._import_worker = self.run_worker(self.run_csv_import(), exclusive=True)
         safe_register_worker(self, self._import_worker)
 
-    # ── 异步操作 ──────────────────────────────────────────────
-
     def _do_sync_deck(self) -> None:
-        """异步切换词书：保存选择 → 重载配置 → 启动同步导入。"""
+        """异步切换词书配置并同步数据"""
         self.is_busy = True
         self.last_msg = "正在切换词包并解析配置..."
         self.last_msg_severity = "info"
@@ -427,7 +466,7 @@ class DeckConfigScreen(Screen):
                 self.render_panel()
 
     def _save_deck_selection_db(self, deck_stem: str) -> None:
-        """保存当前所选词书配置（在后台线程中运行）。"""
+        """保存当前所选词书配置"""
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
@@ -435,57 +474,29 @@ class DeckConfigScreen(Screen):
             setting.active_deck_id = db_deck.id
             session.commit()
 
-    def _do_change_mapping(self) -> None:
-        """异步切换字段映射绑定。"""
-        self.is_busy = True
-        self.last_msg = "正在保存映射关系..."
-        self.last_msg_severity = "info"
-        self.render_panel()
-        self._save_worker = self.run_worker(self._async_change_mapping(), exclusive=True)
-        safe_register_worker(self, self._save_worker)
-
-    async def _async_change_mapping(self) -> None:
-        field_name = self._pending_mapping_key[4:]
-        current_mapping = self.mapping.get(field_name) or "(未绑定)"
-        try:
-            curr_idx = self.csv_headers.index(current_mapping)
-            next_idx = (curr_idx + 1) % len(self.csv_headers)
-        except ValueError:
-            next_idx = 0
-        chosen_header = self.csv_headers[next_idx]
-        
-        old_mapping = self.mapping.get(field_name)
-        if chosen_header == "(未绑定)":
-            self.mapping[field_name] = ""
-        else:
-            self.mapping[field_name] = chosen_header
-            
-        try:
-            await asyncio.to_thread(self._save_mapping_db)
-            self.rebuild_items()
-            self.last_msg = f"已更改 【{self._pending_mapping_label}】 绑定至 CSV 列: {chosen_header}"
-            self.last_msg_severity = "success"
-        except Exception as exc:
-            self.mapping[field_name] = old_mapping or ""
-            self.last_msg = f"更改映射失败: {exc}"
-            self.last_msg_severity = "error"
-        finally:
-            self.is_busy = False
-            safe_unregister_worker(self, self._save_worker)
-            self._save_worker = None
-            if getattr(self, "is_mounted", True):
-                self.render_panel()
-
     def _save_mapping_db(self) -> None:
-        """保存绑定关系到数据库（在后台线程中运行）。"""
+        """保存绑定关系到数据库（按词书独立隔离）"""
+        deck_stem = Path(self.active_deck_name).stem
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
-            setting.csv_column_mapping = json.dumps(self.mapping, ensure_ascii=False)
+            all_mappings = {}
+            if setting.csv_column_mapping:
+                try:
+                    loaded = json.loads(setting.csv_column_mapping)
+                    if isinstance(loaded, dict):
+                        if any(k in CSV_FIELDS for k in loaded):
+                            all_mappings[deck_stem] = loaded
+                        else:
+                            all_mappings = loaded
+                except Exception:
+                    pass
+            all_mappings[deck_stem] = self.mapping
+            setting.csv_column_mapping = json.dumps(all_mappings, ensure_ascii=False)
             session.commit()
 
     def _do_save_visibility(self, key: str, label: str) -> None:
-        """异步保存字段展示状态。"""
+        """异步保存字段展示状态"""
         self.is_busy = True
         self.last_msg = "正在更新字段展示..."
         self.last_msg_severity = "info"
@@ -507,7 +518,6 @@ class DeckConfigScreen(Screen):
             self.last_msg = f"已更新【{label}】展示状态。"
             self.last_msg_severity = "success"
         except Exception as exc:
-            # 回滚
             if key == "show_us":
                 self.show_us = not self.show_us
             elif key == "show_en":
@@ -524,7 +534,6 @@ class DeckConfigScreen(Screen):
                 self.render_panel()
 
     def _save_visibility_db(self) -> None:
-        """保存字段展示状态（在后台线程中运行）。"""
         with self.app.session_factory() as session:
             repo = AppRepository(session)
             setting = repo.get_settings()
@@ -534,11 +543,14 @@ class DeckConfigScreen(Screen):
             session.commit()
 
     def _cancel_workers(self) -> None:
-        """取消仍在运行的后台 worker。"""
+        """非阻塞式取消后台 Worker，防止页面关闭死锁卡顿"""
         for attr in ("_import_worker", "_save_worker"):
             worker = getattr(self, attr, None)
             if worker is not None:
-                worker.cancel()
+                try:
+                    worker.cancel()
+                except Exception:
+                    pass
                 setattr(self, attr, None)
         self._is_importing = False
         self.is_busy = False
@@ -551,7 +563,7 @@ class DeckConfigScreen(Screen):
             path = cfg_imports_dir
         deck_stem = Path(self.active_deck_name).stem
         import_service = ImportService(self.app.session_factory, csv_path=path / self.active_deck_name)
-        
+
         try:
             csv_to_use, rows, missing = await asyncio.to_thread(import_service.read_source_rows, deck_stem)
             if not csv_to_use.exists():
@@ -589,7 +601,6 @@ class DeckConfigScreen(Screen):
         deck_stem: str,
         rows: list[ImportRow],
     ) -> ImportResult:
-        """按批写入数据库，避免一个不可取消的大型 to_thread 任务。"""
         imported = 0
         updated = 0
         skipped = 0

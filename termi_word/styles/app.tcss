@@ -15,22 +15,16 @@ Screen {
     color: #d5d9e0;
 }
 
-/* 屏幕最外层容器：由 Textual 绘制实体灰色边框，强制限制最大高度为 12 行，自适应宽度 */
+/* 屏幕最外层容器：由 Textual 绘制实体灰色边框，自适应动态高度与宽度 */
 .frame-container {
     border: solid #6B7280;
     background: transparent;
-    height: 12;
-    max-height: 12;
-    min-height: 12;
     padding: 0 1;
     layout: vertical;
 }
 
-/* 中间核心字符画内容展示区，固定占用 8 行高 */
+/* 中间核心字符画内容展示区，物理高宽由 compute_frame_layout 动态计算 */
 #content-area {
-    height: 8;
-    max-height: 8;
-    min-height: 8;
     background: transparent;
     color: #d5d9e0;
 }

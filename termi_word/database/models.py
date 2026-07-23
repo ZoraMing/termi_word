@@ -1,6 +1,14 @@
 """SQLAlchemy 数据模型定义"""
 from __future__ import annotations
 
+from termi_word.config import (
+    DEFAULT_DAILY_NEW_TARGET,
+    DEFAULT_REVIEW_SOFT_LIMIT,
+    DEFAULT_DAILY_SPELLING_TARGET,
+    DEFAULT_PANEL_WIDTH,
+    DEFAULT_PANEL_MIN_HEIGHT,
+    DEFAULT_PANEL_MAX_HEIGHT,
+)
 from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean,
@@ -150,9 +158,9 @@ class Setting(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     active_deck_id = Column(Integer, ForeignKey("decks.id", ondelete="SET NULL"), nullable=True)
-    daily_new_target = Column(Integer, default=20)
-    review_soft_limit = Column(Integer, default=100)
-    daily_spelling_target = Column(Integer, default=15)
+    daily_new_target = Column(Integer, default=DEFAULT_DAILY_NEW_TARGET)
+    review_soft_limit = Column(Integer, default=DEFAULT_REVIEW_SOFT_LIMIT)
+    daily_spelling_target = Column(Integer, default=DEFAULT_DAILY_SPELLING_TARGET)
     spelling_enabled = Column(Boolean, default=True)
     spelling_mode = Column(String(30), default="daily")
     study_order = Column(String(30), default="mixed")
@@ -167,9 +175,9 @@ class Setting(Base):
     show_examples = Column(Boolean, default=True)
     theme = Column(String(30), default="dark")
     search_shortcut = Column(String(30), default="ctrl+slash")
-    panel_max_width = Column(Integer, default=120)
-    panel_min_height = Column(Integer, default=6)
-    panel_max_height = Column(Integer, default=16)
+    panel_max_width = Column(Integer, default=DEFAULT_PANEL_WIDTH)
+    panel_min_height = Column(Integer, default=DEFAULT_PANEL_MIN_HEIGHT)
+    panel_max_height = Column(Integer, default=DEFAULT_PANEL_MAX_HEIGHT)
     csv_column_mapping = Column(Text, nullable=True)
     timezone_offset_minutes = Column(Integer, nullable=True)
     footer = Column(Text, nullable=True)  # JSON 格式的 footer 配置

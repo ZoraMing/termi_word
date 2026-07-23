@@ -114,8 +114,7 @@ class WordRepository:
             # 更新现有单词
             for field in ["c", "zh", "en", "us", "core", "ex", "exz"]:
                 value = values.get(field, "").strip()
-                if value:
-                    setattr(existing, field, value)
+                setattr(existing, field, value)
             return "updated"
         else:
             # 创建新单词

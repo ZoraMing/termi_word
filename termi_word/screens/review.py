@@ -5,10 +5,22 @@ import asyncio
 from textual.events import Key
 from textual.widgets import Static
 
+from rich.markup import escape
 from termi_word.database.models import Card
 from termi_word.database.repositories import AppRepository
 from termi_word.ui import TermiScreen, wrap_display, make_tui_progress_bar, safe_register_worker, safe_unregister_worker
 from termi_word.ui.messages import format_study_action_result
+
+
+def _format_us_display(us: str | None) -> str:
+    if not us:
+        return ""
+    us_clean = us.strip()
+    if not us_clean:
+        return ""
+    if us_clean.startswith("/") and us_clean.endswith("/"):
+        return escape(us_clean)
+    return f"/{escape(us_clean)}/"
 
 
 class ReviewScreen(TermiScreen):
@@ -144,16 +156,18 @@ class ReviewScreen(TermiScreen):
         progress = f"{bar} [{self.index + 1}/{len(self.cards)}]{queue_detail}"
         star_flag = " *" if word.is_starred else ""
         today_stats = f" | 待学: {today_new_left}新 {today_rev_left}复"
+        
+        us_formatted = _format_us_display(word.us)
+        c_tag = f"\\[{escape(word.c)}\\]" if word.c else ""
 
         # 2. 区分正面与背面
         if not self.is_revealed:
             # 正面：仅单词、音标、词性/分类
-            us_str = f"/{word.us}/" if word.us else ""
             title_tag = f"{prefix}{mode_zh} 正面"
             lines = [
-                f"  [#F59E0B]{word.w}[/]",
-                f"  {us_str}" if us_str else "",
-                f"  [{word.c or '-'}]",
+                f"  [#F59E0B]{escape(word.w)}[/]",
+                f"  {us_formatted}" if us_formatted else "",
+                f"  {c_tag}" if c_tag else "",
             ]
             msg = self.feedback or "[正面] 请记忆单词，按 Space/Enter 翻卡，或按 1-4 快速评分"
             self.refresh_ui(
@@ -166,19 +180,20 @@ class ReviewScreen(TermiScreen):
             # 背面：生成全部内容行，支持自适应折行与纵向滚动
             content_height, width = self.compute_dynamic_layout()
             
-            us_str = f" /{word.us}/" if word.us else ""
-            header_text = f"  [#F59E0B]{word.w}[/]{us_str}  [{word.c or '-'}]"
+            us_space = f" {us_formatted}" if us_formatted else ""
+            c_space = f" {c_tag}" if c_tag else ""
+            header_text = f"  [#F59E0B]{escape(word.w)}[/]{us_space}{c_space}"
             all_lines = []
             all_lines.extend(wrap_display(header_text, width=width, continuation_indent="  "))
             
             if word.core:
-                all_lines.extend(wrap_display(f"  [#6B7280]Core:[/] {word.core}", width=width, continuation_indent="        "))
+                all_lines.extend(wrap_display(f"  [#6B7280]Core:[/] {escape(word.core)}", width=width, continuation_indent="        "))
             if word.zh:
-                all_lines.extend(wrap_display(f"  [#6B7280]CN:[/]   {word.zh}", width=width, continuation_indent="        "))
+                all_lines.extend(wrap_display(f"  [#6B7280]CN:[/]   {escape(word.zh)}", width=width, continuation_indent="        "))
             if setting.show_en and word.en:
-                all_lines.extend(wrap_display(f"  [#6B7280]EN:[/]   {word.en}", width=width, continuation_indent="        "))
+                all_lines.extend(wrap_display(f"  [#6B7280]EN:[/]   {escape(word.en)}", width=width, continuation_indent="        "))
             if setting.show_examples and word.ex:
-                all_lines.extend(wrap_display(f"  [#6B7280]Ex:[/]   {word.ex}", width=width, continuation_indent="        "))
+                all_lines.extend(wrap_display(f"  [#6B7280]Ex:[/]   {escape(word.ex)}", width=width, continuation_indent="        "))
             if setting.show_examples and word.exz:
                 all_lines.extend(wrap_display(f"        {word.exz}", width=width, continuation_indent="        "))
 

@@ -176,7 +176,7 @@ class CalendarScreen(Screen):
         else:
             msg_widget.add_class("muted")
 
-        msg_widget.update(self.last_msg or "按 ↑↓ 选择字段，Enter 键修改")
+        msg_widget.update(self.last_msg or "↑↓ 选择字段   Space 选中修改   Enter 确认保存")
         footer_output = render_footer(footer_text, width) if is_footer_visible(self) else ""
         footer_widget.update(footer_output)
 
@@ -227,7 +227,12 @@ class CalendarScreen(Screen):
             self.render_calendar()
             return
 
-        if key in ("enter", "space"):
+        if key == "space":
+            event.stop()
+            self._open_editor()
+            return
+
+        if key == "enter":
             event.stop()
             self._open_editor()
             return
@@ -246,7 +251,7 @@ class CalendarScreen(Screen):
         inp.cursor_position = len(inp.value)
         inp.focus()
         
-        self.last_msg = f"正在修改【{label}】数值"
+        self.last_msg = f"正在修改【{label}】数值，按 Enter 确认保存"
         self.last_msg_severity = "info"
         self.render_calendar()
 

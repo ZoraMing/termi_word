@@ -8,7 +8,24 @@
 - 窗口动态自适应：界面能在 `6-16` 行高间弹性适配。长词义和例句自动折行，支持 `↑↓` 方向键平滑滚动。
 - 全键盘操作：双手无需离开主键盘区，所有功能一键直达。
 - 自定义任何词包：直接将 CSV 词书放入 `termi_data/imports/` 即可导入，支持自定义列名映射。
-- 拼写练习：支持听音拼写，打字时顶部提供实时进度与对错反馈。
+- 拼写练习：支持拼写，打字时顶部提供实时进度与对错反馈。
+
+这里是可以直接使用的测试单词表：[words.csv](termi_data/imports/words.csv)
+下载release中的包解压后, 将这个words.csv放入同级目录的termi_data/imports/words.csv下就可以正常导入开始学习了
+即目录结构如下
+```text
+termi_word_windows/
+├── termi_data/
+│   ├── imports/            <-- 你的词书, 在此存放和更新
+│   │   ├── words.csv
+│   │   ├── other_words.csv
+│   └── termi_word.sqlite3  <-- 你的设置和历史数据
+├── termi_word/
+├── greenlet/
+├── sqlalchemy/
+├── termi_word.exe
+└── ...
+```
 
 ## 快捷键与使用指南
 

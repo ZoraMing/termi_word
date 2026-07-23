@@ -10,7 +10,16 @@ from textual.binding import Binding
 from textual.events import Key
 from textual.widgets import Static
 
-from termi_word.config import APP_TITLE, DEFAULT_DB_PATH
+from termi_word.config import (
+    APP_TITLE,
+    DEFAULT_DB_PATH,
+    DEFAULT_DAILY_NEW_TARGET,
+    DEFAULT_REVIEW_SOFT_LIMIT,
+    DEFAULT_DAILY_SPELLING_TARGET,
+    DEFAULT_PANEL_WIDTH,
+    DEFAULT_PANEL_MIN_HEIGHT,
+    DEFAULT_PANEL_MAX_HEIGHT,
+)
 from termi_word.database.engine import create_session_factory, init_database
 from termi_word.runtime_paths import RUNTIME_PATHS, ensure_data_directories
 from termi_word.screens.calendar import CalendarScreen
@@ -180,9 +189,9 @@ class TermiWordApp(App):
             setting = AppRepository(session).get_settings()
             self.settings = SimpleNamespace(
                 search_shortcut=getattr(setting, "search_shortcut", None) or "ctrl+slash",
-                panel_max_width=int(getattr(setting, "panel_max_width", 120) or 120),
-                panel_min_height=int(getattr(setting, "panel_min_height", 6) or 6),
-                panel_max_height=int(getattr(setting, "panel_max_height", 16) or 16),
+                panel_max_width=int(getattr(setting, "panel_max_width", DEFAULT_PANEL_WIDTH) or DEFAULT_PANEL_WIDTH),
+                panel_min_height=int(getattr(setting, "panel_min_height", DEFAULT_PANEL_MIN_HEIGHT) or DEFAULT_PANEL_MIN_HEIGHT),
+                panel_max_height=int(getattr(setting, "panel_max_height", DEFAULT_PANEL_MAX_HEIGHT) or DEFAULT_PANEL_MAX_HEIGHT),
                 timezone_offset_minutes=getattr(setting, "timezone_offset_minutes", None),
                 home_key_study=getattr(setting, "home_key_study", None) or "1",
                 home_key_review=getattr(setting, "home_key_review", None) or "2",
@@ -190,9 +199,9 @@ class TermiWordApp(App):
                 home_key_words=getattr(setting, "home_key_words", None) or "4",
                 home_key_calendar=getattr(setting, "home_key_calendar", None) or "5",
                 home_key_settings=getattr(setting, "home_key_settings", None) or "6",
-                daily_new_target=getattr(setting, "daily_new_target", 20),
-                review_soft_limit=getattr(setting, "review_soft_limit", 100),
-                daily_spelling_target=getattr(setting, "daily_spelling_target", 15),
+                daily_new_target=getattr(setting, "daily_new_target", DEFAULT_DAILY_NEW_TARGET),
+                review_soft_limit=getattr(setting, "review_soft_limit", DEFAULT_REVIEW_SOFT_LIMIT),
+                daily_spelling_target=getattr(setting, "daily_spelling_target", DEFAULT_DAILY_SPELLING_TARGET),
                 show_us=getattr(setting, "show_us", True),
                 show_en=getattr(setting, "show_en", True),
                 show_examples=getattr(setting, "show_examples", True),

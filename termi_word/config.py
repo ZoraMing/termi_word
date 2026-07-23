@@ -32,7 +32,18 @@ def __getattr__(name: str):
 
 APP_TITLE = "Termi Word"
 
-# 学习默认参数
-DEFAULT_DAILY_NEW_TARGET = 20
-DEFAULT_REVIEW_SOFT_LIMIT = 100
-DEFAULT_DAILY_SPELLING_TARGET = 15
+# 学习默认参数常量定义
+DEFAULT_DAILY_NEW_TARGET = 20        # 每轮新词默认目标数
+DEFAULT_REVIEW_SOFT_LIMIT = 100      # 每轮复习默认软上限
+DEFAULT_DAILY_SPELLING_TARGET = 15   # 每日拼写默认目标数
+
+
+# 面板尺寸默认值与用户配置边界范围常量定义
+DEFAULT_PANEL_WIDTH = 68         # 内容区域标准显示宽度
+DEFAULT_PANEL_HEIGHT = 12        # 内容区域标准显示高度
+DEFAULT_PANEL_MIN_HEIGHT = 6     # 默认面板最小高度
+DEFAULT_PANEL_MAX_HEIGHT = 16    # 默认面板最大高度
+
+PANEL_MIN_HEIGHT_RANGE = (1, 50)   # panel_min_height 配置校验区间 (MIN, MAX)
+PANEL_MAX_HEIGHT_RANGE = (1, 50)   # panel_max_height 配置校验区间 (MIN, MAX)
+PANEL_MAX_WIDTH_RANGE = (10, 200)  # panel_max_width 配置校验区间 (MIN, MAX)

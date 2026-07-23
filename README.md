@@ -10,7 +10,7 @@
 - 自定义任何词包：直接将 CSV 词书放入 `termi_data/imports/` 即可导入，支持自定义列名映射。
 - 拼写练习：支持拼写，打字时顶部提供实时进度与对错反馈。
 
-这里是可以直接使用的测试单词表：[words.csv](termi_data/imports/words.csv)
+这里是可以直接下载或复制使用的测试850简单单词表：[words.csv](termi_data/imports/words.csv)
 下载release中的包解压后, 将这个words.csv放入同级目录的termi_data/imports/words.csv下就可以正常导入开始学习了
 即目录结构如下
 ```text
@@ -26,6 +26,10 @@ termi_word_windows/
 ├── termi_word.exe
 └── ...
 ```
+
+![主页面](image/README/1784797746221.png)
+![学习页面](image/README/1784797788547.png)
+![搜索词页面](image/README/1784797890735.png)
 
 ## 快捷键与使用指南
 
@@ -81,38 +85,85 @@ termi_word_windows/
 
 | 列名 | 说明 | 示例值 | 是否必须 |
 |:---|:---|:---|:---|
-| `w` | 单词 (Word) | abandon | 必须 |
-| `zh` | 中文释义 (Chinese) | vt. 放弃，遗弃 | 推荐 (用于背诵时查看) |
-| `en` | 英文释义 (English) | to leave behind | 可选 |
-| `us` | 音标 (Pronunciation) | /əˈbændən/ | 可选 |
-| `c` | 词性分类 (Category) | 核心词汇 | 可选 |
-| `core` | 核心词标记 (Core Tag) | 1 (1表示核心，0或空表示普通) | 可选 |
-| `ex` | 英文例句 (Example) | He abandoned his car in the snow. | 可选 |
-| `exz` | 例句翻译 (Example Trans) | 他把车丢弃在雪地里。 | 可选 |
+| `w` | 单词 (Word) | come | 必须 |
+| `c` | 词性 / 分类 (Category) | op | 可选 |
+| `zh` | 中文释义 (Chinese) | 来,前来 | 推荐 (用于背诵时查看) |
+| `en` | 英文释义 (English) | move toward the speaker or a place | 可选 |
+| `us` | 音标 (Pronunciation) | /kʌm/ | 可选 |
+| `core` | 核心释义 (Core Meaning) | 朝说话者或目标靠近，让彼此距离变短。 | 可选 |
+| `ex` | 英文例句 (Example) | Come here when you're ready. | 可选 |
+| `exz` | 例句翻译 (Example Trans) | 准备好了就过来。 | 可选 |
 
 示例格式：
 ```csv
-w,zh,us,en,ex,exz
-abandon,"vt. 放弃，遗弃",/əˈbændən/,"to leave behind","He abandoned his car in the snow.","他把车丢弃在雪地里。"
-ability,"n. 能力，才能",/əˈbɪləti/,"the power or skill to do something","She has the ability to speak three languages.","她有能力说三门语言。"
+w,c,zh,en,us,core,ex,exz
+come,op,"来,前来",move toward the speaker or a place,/kʌm/,朝说话者或目标靠近，让彼此距离变短。,Come here when you're ready.,准备好了就过来。
+get,op,"得到,获得;变得","obtain, become, or receive",/ɡɛt/,把东西收到手里，或让状态变成新的样子。,I'll get a new book tomorrow.,我明天会买本新书。
 ```
 
 ### 2. 自定义 CSV 列名映射
 
 如果你的 CSV 词书列名与推荐的并不一致（例如使用 `Word` 代替 `w`，`Translate` 代替 `zh`）：
 
-1. 准备 CSV 文件：确保为UTF-8编码且第一行为表头，将其放入 `termi_data/imports/` 目录下（如 `my_words.csv`）。
+1. 准备 CSV 文件：确保为UTF-8编码且第一行为表头，将其放入程序所在的目录的 `termi_data/imports/` 目录下（如 `my_words.csv`）。
 2. 在应用中绑定字段：
    - 进入系统设置与词书管理界面。在 CSV 列表中选中 `my_words.csv` 并按回车设定为当前词书。
    - 在下方的 “映射关系配置” 中，按 `Enter` 循环切换，将 `单词映射(w)` 绑定到 `Word` 列，`中文映射(zh)` 绑定到 `Translate` 列。
    - 移动光标到最下方的 `[确认执行同步]` 按回车，再次按 `y` 确认。
 
-### 3. 如何修改或更正已有词书
+### 3. 将 JSON 词包转换为 CSV 格式
+
+如果你有 JSON 格式的外部词表，可以直接使用项目中简易的转换脚本 `scripts/convert_json.py`：
+
+```bash
+# 执行转换（自动生成并保存至 termi_data/imports/my_words.csv）
+python scripts/convert_json.py path/to/my_words.json
+```
+
+#### 支持的 4 种典型 JSON 输入格式参考：
+
+**【格式 1】标准对象数组**
+```json
+[
+  {"w": "abandon", "zh": "vt. 放弃，遗弃", "us": "/əˈbændən/", "ex": "He abandoned his car."},
+  {"w": "ability", "zh": "n. 能力，才能", "us": "/əˈbɪləti/"}
+]
+```
+
+**【格式 2】包含列表的包裹字典**
+```json
+{
+  "title": "CET-4 核心词汇",
+  "words": [
+    {"word": "abandon", "translation": "vt. 放弃", "phonetic": "/əˈbændən/"}
+  ]
+}
+```
+
+**【格式 3】单词-释义键值对**
+```json
+{
+  "abandon": "vt. 放弃，遗弃",
+  "ability": "n. 能力，才能"
+}
+```
+
+**【格式 4】JSONLines 逐行文件**
+```json
+{"w": "abandon", "zh": "vt. 放弃"}
+{"w": "ability", "zh": "n. 能力"}
+```
+
+*提示：若你的 JSON 键名比较特殊（如使用 `"headWord"` 或 `"tranCn"`），脚本会自动识别大部分常见命名。如需自定义，可随时在 [scripts/convert_json.py](termi_word/scripts/convert_json.py) 顶部的 `FIELD_MAP` 中增减候选键名。*
+
+---
+
+### 4. 如何修改或更正已有词书
 
 如果你发现词书里的单词释义有误，或者想补充例句：
 
 1. 直接修改CSV：打开 `termi_data/imports/` 下的对应 `.csv` 文件，直接修改错别字或补全释义。
-2. 重新同步数据：打开程序按 `6` 进入设置界面，选中对应词书并点击 `[确认执行同步]`。系统会自动覆盖更新修改后的释义，同时保留你现有的背词进度和复习卡片。
+2. 重新同步数据：打开程序进入设置界面，选中对应词书并点击 `[确认执行同步]`。系统会自动覆盖更新修改后的释义，同时保留你现有的背词进度和复习卡片。
 3. 挂起问题单词：背词过程中如果遇到不需要背的词，按 `t` 键并按 `y` 确认，即可挂起该单词，后续复习将自动忽略它。
 
 ---

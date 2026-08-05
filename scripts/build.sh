@@ -58,6 +58,15 @@ if [ ! -f "$BUILD_EXE" ]; then
     exit 1
 fi
 
+# 复制默认词表到打包目录
+SRC_WORDS_CSV="$PROJECT_ROOT/termi_data/imports/words.csv"
+if [ -f "$SRC_WORDS_CSV" ]; then
+    TARGET_IMPORTS_DIR="$DIST_DIR/termi_data/imports"
+    mkdir -p "$TARGET_IMPORTS_DIR"
+    cp "$SRC_WORDS_CSV" "$TARGET_IMPORTS_DIR/"
+    echo "Copied words.csv to $TARGET_IMPORTS_DIR"
+fi
+
 echo "Built Standalone: $DIST_DIR"
 echo "Executable: $BUILD_EXE"
 

@@ -26,6 +26,29 @@ termi_word_windows/
 ├── termi_word.exe
 └── ...
 ```
+后续使用直接在终端输入termi_word的绝对地址就可以在任意位置的终端启动
+
+不想输入地址, 想要使用别名启动, 可以按照以下步骤
+例如现在`release`下载后解压位置为 "D:\termi_word_windows\termi-word.exe", 期望后续使用别名`tw`快捷启动
+> 记得改为 `D:\termi_word_windows\termi-word.exe` 和 `tw`为 自己实际地址和想要的启动命令 
+
+linux/mac 下bash输入
+```bash
+echo "alias tw='/d/termi_word_windows/termi-word.exe'" >> ~/.bashrc && source ~/.bashrc
+```
+
+windows 下, 
+1. win+x, 以管理员身份打开powershell, 输入
+```powershell
+New-Item -ItemType SymbolicLink -Path "D:\termi_word_windows\tw.exe" -Target "D:\termi_word_windows\termi-word.exe"
+```
+接下来将目录添加到系统 PATH 环境变量
+2. 按快捷键 Win + R 输入 sysdm.cpl 打开“系统属性”
+3. 切换到“高级”选项卡，点击右下角的“环境变量”
+4. 在“系统变量”或“用户变量”中找到并双击 Path
+5. 点击右侧的“新建”，填入：D:\termi_word_windows, 一路点击“确定”保存
+
+重新打开cmd或powershell, 输入tw, 就可以启动项目了
 
 ![主页面](image/README/1784797746221.png)
 ![学习页面](image/README/1784797788547.png)

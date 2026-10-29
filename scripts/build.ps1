@@ -56,13 +56,15 @@ if (-not (Test-Path -LiteralPath $BuildExe)) {
     throw "Executable build failed: $BuildExe not found"
 }
 
-# 复制默认词表到打包目录
-$SrcWordsCsv = Join-Path $ProjectRoot "termi_data/imports/words.csv"
-if (Test-Path -LiteralPath $SrcWordsCsv) {
-    $TargetImportsDir = Join-Path $DistDir "termi_data/imports"
-    New-Item -ItemType Directory -Force -Path $TargetImportsDir | Out-Null
-    Copy-Item -LiteralPath $SrcWordsCsv -Destination $TargetImportsDir -Force
-    Write-Host "Copied words.csv to $TargetImportsDir"
+# 复制自带词书到打包目录
+$TargetImportsDir = Join-Path $DistDir "termi_data/imports"
+New-Item -ItemType Directory -Force -Path $TargetImportsDir | Out-Null
+foreach ($Deck in @("words", "CET4", "CET6", "IELTS")) {
+    $SrcCsv = Join-Path $ProjectRoot "termi_data/imports/$Deck.csv"
+    if (Test-Path -LiteralPath $SrcCsv) {
+        Copy-Item -LiteralPath $SrcCsv -Destination $TargetImportsDir -Force
+        Write-Host "Copied $Deck.csv to $TargetImportsDir"
+    }
 }
 
 Write-Host "Build completed: $DistDir"

@@ -1,20 +1,22 @@
+"""将 kajweb/dict 词书（CET4、CET6、IELTS 等，每行一个 JSON）转换为 TermiWord CSV
+
+用法: python scripts/convert_kajweb.py <JSON文件路径> <输出CSV路径>
+"""
+
 import json
 import csv
+import sys
 from pathlib import Path
 
-# 获取项目根目录和文件路径
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-JSON_PATH = PROJECT_ROOT / "data" / "IELTSluan_2.json"
-CSV_PATH = PROJECT_ROOT / "data" / "IELTSluan_2.csv"
 
-def convert():
-    if not JSON_PATH.exists():
-        print(f"错误: 找不到雅思词包 JSON 文件：{JSON_PATH}")
+def convert(json_path: Path, csv_path: Path):
+    if not json_path.exists():
+        print(f"错误: 找不到词书 JSON 文件：{json_path}")
         return
 
     csv_rows = []
     
-    with open(JSON_PATH, "r", encoding="utf-8") as f:
+    with open(json_path, "r", encoding="utf-8") as f:
         for idx, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -33,9 +35,9 @@ def convert():
             content_word = item.get("content", {}).get("word", {})
             word_content = content_word.get("content", {})
             
-            # 1. 英音音标与美音音标
-            c = word_content.get("ukphone", "").strip()
-            us = word_content.get("usphone", "").strip()
+            # 1. 美音音标，统一为 /…/ 形式
+            us = word_content.get("usphone", "").strip().strip("/")
+            us = f"/{us}/" if us else ""
             
             # 2. 中文释义与英文释义拼接
             trans = word_content.get("trans", [])
@@ -60,6 +62,8 @@ def convert():
                         en_parts.append(tranOther)
             
             zh = "；".join(zh_parts)
+            # 分类列使用词性，如 n/v
+            c = "/".join(dict.fromkeys(t.get("pos", "").strip() for t in trans if t.get("pos", "").strip()))
             en = "；".join(en_parts)
             
             # 3. 核心助记（记忆方法）与核心短语
@@ -101,15 +105,18 @@ def convert():
             })
 
     print(f"数据解析完成。共提取到 {len(csv_rows)} 个有效单词。")
-    print(f"正在写入 CSV 文件到：{CSV_PATH}...")
+    print(f"正在写入 CSV 文件到：{csv_path}...")
     
-    with open(CSV_PATH, "w", encoding="utf-8-sig", newline="") as f:
+    with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
         # 定义与 Word 模型表结构一致的列名
         writer = csv.DictWriter(f, fieldnames=["w", "c", "zh", "en", "us", "core", "ex", "exz"])
         writer.writeheader()
         writer.writerows(csv_rows)
         
-    print("雅思词包 CSV 文件生成成功！")
+    print("词书 CSV 文件生成成功！")
 
 if __name__ == "__main__":
-    convert()
+    if len(sys.argv) > 2:
+        convert(Path(sys.argv[1]), Path(sys.argv[2]))
+    else:
+        print("用法: python scripts/convert_kajweb.py <JSON文件路径> <输出CSV路径>")

@@ -1,5 +1,6 @@
 """背词队列调度与学习进度会话管理服务"""
 from __future__ import annotations
+import random
 
 from sqlalchemy.orm import sessionmaker
 
@@ -94,6 +95,9 @@ class StudyService:
             # 如果没有卡片，不创建空的学习会话，直接返回空队列
             if not mixed_cards:
                 return StudyQueue(deck.id, [], None, is_extra=is_extra)
+
+            # 本轮单词乱序呈现
+            random.shuffle(mixed_cards)
 
             # 创建会话
             study_session = StudySession(

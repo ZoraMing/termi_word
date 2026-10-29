@@ -108,8 +108,10 @@ class ImportService:
 
     def ensure_initial_data(self) -> None:
         """检查数据库，扫描导入目录下所有 CSV，并将未导入的词书自动导入。"""
-        decks = self.available_decks()
         data_dir = Path(self.csv_path).parent
+        # 默认词书优先创建，使其成为首次启动时的活跃词本
+        default_deck = Path(self.csv_path).stem
+        decks = sorted(self.available_decks(), key=lambda name: name != default_deck)
         for deck_name in decks:
             with self.session_factory() as session:
                 repo = AppRepository(session)

@@ -7,15 +7,15 @@
 
 ![演示](docs/assets/demo.gif)
 
-- 窗口很小，可以放在屏幕一角，工作间隙背几个词。
+- 窗口很小，可以放在屏幕一角或工作时的额外终端，工作间隙背几个词。
 - 全程用键盘操作，不用鼠标。
-- 自带 850 个基础英语单词，下载后就能开始背。
+- 自带 850 个基础英语单词，以及四级（CET4）、六级（CET6）、雅思（IELTS）词书，下载后就能开始背。
 - 背单词、拼写练习、查词、打卡日历都有。
 - 可以换成你自己用 Excel 做的单词表。
 
 ## 下载
 
-| 你的电脑 | 点击下载 |
+| 操作系统 | 下载地址 |
 |:---|:---|
 | Windows 10 / 11 | [termi_word_windows.zip](https://github.com/ZoraMing/termi_word/releases/latest/download/termi_word_windows.zip) |
 | Mac（Apple 芯片：M1、M2、M3、M4 等） | [termi_word_mac_arm64.tar.gz](https://github.com/ZoraMing/termi_word/releases/latest/download/termi_word_mac_arm64.tar.gz) |
@@ -32,9 +32,8 @@
 1. 下载 termi_word_windows.zip。
 2. 在下载的文件上点右键，选"全部解压缩"，再点"提取"。会得到一个 termi_word_windows 文件夹。
 3. 打开这个文件夹，找到 termi-word.exe 双击。文件夹里文件很多，可以在右上角的搜索框输入 termi-word 快速找到。
-4. 弹出一个黑色窗口，就是程序本身。
+4. 弹出一个黑色窗口，就是程序本身。也可以将 termi-word.exe 拖动放到 PowerShell 或 cmd 窗口直接运行
 
-第一次打开时，Windows 可能弹出蓝色的"Windows 已保护你的电脑"。这是因为程序没有购买数字签名，点"更多信息"，再点"仍要运行"即可，以后不会再提示。
 
 以后想打开得方便些：在 termi-word.exe 上点右键，选"发送到"→"桌面快捷方式"（Windows 11 要先点"显示更多选项"），之后双击桌面图标就能打开。注意不要把 termi-word.exe 单独复制或移动出来，它需要和文件夹里的其他文件放在一起才能运行。
 
@@ -53,6 +52,42 @@ mkdir -p ~/termi_word
 tar -xzf termi_word_linux_amd64.tar.gz -C ~/termi_word
 ~/termi_word/termi-word
 ```
+
+### 在终端输入 tw 启动（可选）
+
+设置一次以后，打开任意终端窗口，输入 tw 回车就能启动，不用再去找文件夹。先把程序文件夹放到一个固定位置，设置完就不要再移动它，移动后需要重新设置。
+
+Windows：
+
+1. 打开程序文件夹（里面能看到 termi-word.exe 的那一层）。
+2. 点文件夹窗口上方的地址栏，把里面的文字删掉，输入 powershell 回车，会打开一个蓝色或黑色的 PowerShell 窗口。
+3. 把下面两行复制进去，回车。第一行在程序文件夹里建一个名叫 tw 的启动文件，第二行让系统记住这个文件夹的位置：
+
+```powershell
+Set-Content tw.cmd '@"%~dp0termi-word.exe" %*' -Encoding ascii
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$PWD", "User")
+```
+
+4. 关掉这个窗口。以后打开 PowerShell、"终端"或命令提示符（cmd）都可以，输入 tw 回车即可。也可以按 Win + R，输入 tw 回车直接启动。
+
+Mac（zsh）：
+
+1. 打开"终端"
+2. 输入 cd 和一个空格，先不要回车，把程序文件夹从访达拖进终端窗口，再按回车。
+3. 复制下面一行进去，回车：
+
+```bash
+echo "alias tw='$PWD/termi-word'" >> ~/.zshrc && source ~/.zshrc
+```
+
+Linux（bash），按上面的解压位置：
+
+```bash
+cd ~/termi_word
+echo "alias tw='$PWD/termi-word'" >> ~/.bashrc && source ~/.bashrc
+```
+
+之后在任意终端输入 tw 就能快速启动。同一个设置只需要做一次，重复执行会在配置里留下重复的内容。
 
 ## 背第一组单词
 
@@ -76,7 +111,7 @@ tar -xzf termi_word_linux_amd64.tar.gz -C ~/termi_word
 
 也可以不翻面直接按 1 到 4，程序会翻面并记下这个分数，看完释义再按空格确认。
 
-## 每天怎么用
+## 怎么用
 
 首页有六个入口，按对应的数字键进入：
 
@@ -89,9 +124,9 @@ tar -xzf termi_word_linux_amd64.tar.gz -C ~/termi_word
 | 5 | 日历：看每天的打卡情况 |
 | 6 | 设置：调整每天的数量、换词书 |
 
-建议每天按这个顺序来：先按 2 复习，再按 1 学新词，最后按 3 拼写。
+建议每天按这个顺序来：先 2 复习，再 1 学新词，最后 3 拼写。
 
-哪个词哪天该复习，程序会根据你的打分自动安排（使用 FSRS 记忆算法），不需要你自己记。有该复习的词时，首页会提示待复习的数量。这时按 1，程序会先提醒你建议先复习；如果就想学新词，再按一次 1。
+哪个词哪天该复习，程序会根据你的打分自动安排（使用 FSRS 记忆算法），不需要你自己记。有该复习的词时，首页会提示待复习的数量
 
 ### 拼写
 
@@ -119,7 +154,7 @@ tar -xzf termi_word_linux_amd64.tar.gz -C ~/termi_word
 
 ## 换成自己的单词书
 
-程序自带的 850 词是一个叫 words 的词书。你可以用 Excel 做一份自己的单词表，换着背。
+程序自带 words（850 个基础词）、CET4（3739 词）、CET6（2078 词）、IELTS（3427 词）四本词书，默认使用 words，可以在设置里的"词书与映射管理"切换。你也可以用 Excel 做一份自己的单词表，换着背。
 
 1. 用 Excel 新建一个表格，第一行写列名，从第二行开始每行一个单词。第一行要把下面 8 个列名都写上，顺序不限。w 列必须填单词，其他列没有内容可以空着，但列名不能省，少了列名程序会提示"词表字段缺失"。
 
@@ -275,34 +310,6 @@ xattr -dr com.apple.quarantine ~/Downloads/termi_word_mac_arm64
 ## 进阶用法
 
 下面的内容需要用到命令行，不影响日常使用，可以跳过。
-
-<details>
-<summary>在命令行输入 tw 直接启动</summary>
-
-下面以程序解压在 D:\termi_word_windows 为例，换成你自己的路径。
-
-Windows：打开 PowerShell（不需要管理员权限），依次执行下面两行。第一行在程序文件夹里建一个名叫 tw 的启动文件，第二行把程序文件夹加入系统的查找路径：
-
-```powershell
-Set-Content -Path "D:\termi_word_windows\tw.cmd" -Value '@"%~dp0termi-word.exe" %*' -Encoding ascii
-[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";D:\termi_word_windows", "User")
-```
-
-关掉 PowerShell 重新打开，输入 tw 就能启动。
-
-Mac（默认使用 zsh）：
-
-```bash
-echo "alias tw='$HOME/termi_word_mac_arm64/termi-word'" >> ~/.zshrc && source ~/.zshrc
-```
-
-Linux（bash）：
-
-```bash
-echo "alias tw='$HOME/termi_word/termi-word'" >> ~/.bashrc && source ~/.bashrc
-```
-
-</details>
 
 <details>
 <summary>把 JSON 格式的词表转换成 CSV</summary>

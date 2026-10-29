@@ -17,7 +17,7 @@ python -m termi_word
 
 ## 打包
 
-项目使用 Nuitka 的 standalone 模式构建，构建脚本会把 termi_data/imports/words.csv 一起打进去，并生成压缩包。
+项目使用 Nuitka 的 standalone 模式构建，构建脚本会把 termi_data/imports/ 下的 words.csv、CET4.csv、CET6.csv、IELTS.csv 一起打进去，并生成压缩包。
 
 ```bash
 pip install nuitka

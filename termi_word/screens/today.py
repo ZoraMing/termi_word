@@ -144,7 +144,7 @@ class TodayScreen(Screen):
             due_count = len(repo.due_cards(deck.id)) if deck else 0
 
         # 精确格式化核心静态字符画，自适应宽度
-        title_fill = " " * max(1, width - display_width("Termi Word") - display_width("? 展示帮助") - 2)
+        title_fill = " " * max(1, width - display_width("Termi Word") - display_width("? 展示帮助"))
         lines = [
             f"Termi Word{title_fill}? 展示帮助",
             rule(width=width),

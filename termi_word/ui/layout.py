@@ -31,7 +31,8 @@ def compute_frame_layout(
     """统一计算 Termi Word 界面的容器高度、内容宽度、页脚高度和主体高度。"""
     frame_height = panel_height(terminal_height, panel_min_height, panel_max_height)
     frame_width = panel_width(terminal_width, panel_max_width)
-    content_width = max(1, frame_width - 2)
+    # 容器左右边框(2) + 左右内边距(2)，对应 app.tcss 中 .frame-container 的 border 与 padding: 0 1
+    content_width = max(1, frame_width - 4)
     footer_rows = footer_height(footer_text, content_width) if footer_visible else 0
     input_rows = 1 if has_input else 0
     # 容器边框(2) + 输入框行数 + 消息行数 + 页脚行数

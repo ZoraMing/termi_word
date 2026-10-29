@@ -1,246 +1,327 @@
 # Termi Word
 
-一个专为终端用户打造的摸鱼/高效背单词工具，基于 Textual和FSRS算法。
+在电脑上开一个小窗口背单词。不用联网，不用注册，学习记录都保存在你自己的电脑里。程序会按记忆规律帮你安排每个词哪天该复习，你只管每天打开背。
 
-## 特性
+[![最新版本](https://img.shields.io/github/v/release/ZoraMing/termi_word)](https://github.com/ZoraMing/termi_word/releases/latest)
+[![下载量](https://img.shields.io/github/downloads/ZoraMing/termi_word/total)](https://github.com/ZoraMing/termi_word/releases)
 
-- 命令行原生：不用起重型客户端，分出终端小窗就能默默背词。
-- 窗口动态自适应：界面能在 `6-16` 行高间弹性适配。长词义和例句自动折行，支持 `↑↓` 方向键平滑滚动。
-- 全键盘操作：双手无需离开主键盘区，所有功能一键直达。
-- 自定义任何词包：直接将 CSV 词书放入 `termi_data/imports/` 即可导入，支持自定义列名映射。
-- 拼写练习：支持拼写，打字时顶部提供实时进度与对错反馈。
+![演示](docs/assets/demo.gif)
 
-这里是可以直接下载或复制使用的测试850简单单词表：[words.csv](termi_data/imports/words.csv)
-下载release中的包解压后, 将这个words.csv放入同级目录的termi_data/imports/words.csv下就可以正常导入开始学习了
-即目录结构如下
-```text
-termi_word_windows/
-├── termi_data/
-│   ├── imports/            <-- 你的词书, 在此存放和更新
-│   │   ├── words.csv
-│   │   ├── other_words.csv
-│   └── termi_word.sqlite3  <-- 你的设置和历史数据
-├── termi_word/
-├── greenlet/
-├── sqlalchemy/
-├── termi_word.exe
-└── ...
-```
-后续使用直接在终端输入termi_word的绝对地址就可以在任意位置的终端启动
+- 窗口很小，可以放在屏幕一角，工作间隙背几个词。
+- 全程用键盘操作，不用鼠标。
+- 自带 850 个基础英语单词，下载后就能开始背。
+- 背单词、拼写练习、查词、打卡日历都有。
+- 可以换成你自己用 Excel 做的单词表。
 
-不想输入地址, 想要使用别名启动, 可以按照以下步骤
-例如现在`release`下载后解压位置为 "D:\termi_word_windows\termi-word.exe", 期望后续使用别名`tw`快捷启动
-> 记得改为 `D:\termi_word_windows\termi-word.exe` 和 `tw`为 自己实际地址和想要的启动命令 
+## 下载
 
-linux/mac 下bash输入
+| 你的电脑 | 点击下载 |
+|:---|:---|
+| Windows 10 / 11 | [termi_word_windows.zip](https://github.com/ZoraMing/termi_word/releases/latest/download/termi_word_windows.zip) |
+| Mac（Apple 芯片：M1、M2、M3、M4 等） | [termi_word_mac_arm64.tar.gz](https://github.com/ZoraMing/termi_word/releases/latest/download/termi_word_mac_arm64.tar.gz) |
+| Linux（64 位） | [termi_word_linux_amd64.tar.gz](https://github.com/ZoraMing/termi_word/releases/latest/download/termi_word_linux_amd64.tar.gz) |
+
+不确定自己的 Mac 是哪种芯片：点屏幕左上角的苹果图标，选"关于本机"，看"芯片"一栏。写着 Apple M 开头的就可以用；写着 Intel 的，目前没有对应的安装包。
+
+所有历史版本在 [Releases 页面](https://github.com/ZoraMing/termi_word/releases)。
+
+## 开始使用
+
+### Windows
+
+1. 下载 termi_word_windows.zip。
+2. 在下载的文件上点右键，选"全部解压缩"，再点"提取"。会得到一个 termi_word_windows 文件夹。
+3. 打开这个文件夹，找到 termi-word.exe 双击。文件夹里文件很多，可以在右上角的搜索框输入 termi-word 快速找到。
+4. 弹出一个黑色窗口，就是程序本身。
+
+第一次打开时，Windows 可能弹出蓝色的"Windows 已保护你的电脑"。这是因为程序没有购买数字签名，点"更多信息"，再点"仍要运行"即可，以后不会再提示。
+
+以后想打开得方便些：在 termi-word.exe 上点右键，选"发送到"→"桌面快捷方式"（Windows 11 要先点"显示更多选项"），之后双击桌面图标就能打开。注意不要把 termi-word.exe 单独复制或移动出来，它需要和文件夹里的其他文件放在一起才能运行。
+
+### Mac
+
+1. 下载 termi_word_mac_arm64.tar.gz，双击解压，得到一个文件夹。
+2. 打开文件夹，双击 termi-word，会打开"终端"窗口并启动程序。
+3. 如果提示"无法打开，因为无法验证开发者"，打开"系统设置"→"隐私与安全性"，在页面下方找到关于 termi-word 的提示，点"仍要打开"，然后再双击一次 termi-word。
+
+如果按上面做了还是打不开，看后面常见问题里的处理办法。
+
+### Linux
+
 ```bash
-echo "alias tw='/d/termi_word_windows/termi-word.exe'" >> ~/.bashrc && source ~/.bashrc
+mkdir -p ~/termi_word
+tar -xzf termi_word_linux_amd64.tar.gz -C ~/termi_word
+~/termi_word/termi-word
 ```
 
-windows 下, 
-1. win+x, 以管理员身份打开powershell, 输入
-```powershell
-New-Item -ItemType SymbolicLink -Path "D:\termi_word_windows\tw.exe" -Target "D:\termi_word_windows\termi-word.exe"
-```
-接下来将目录添加到系统 PATH 环境变量
-2. 按快捷键 Win + R 输入 sysdm.cpl 打开“系统属性”
-3. 切换到“高级”选项卡，点击右下角的“环境变量”
-4. 在“系统变量”或“用户变量”中找到并双击 Path
-5. 点击右侧的“新建”，填入：D:\termi_word_windows, 一路点击“确定”保存
+## 背第一组单词
 
-重新打开cmd或powershell, 输入tw, 就可以启动项目了
+![背单词](docs/assets/study.gif)
 
-![主页面](image/README/1784797746221.png)
-![学习页面](image/README/1784797788547.png)
-![搜索词页面](image/README/1784797890735.png)
+打开后看到的是首页。按 1 开始学习：
 
-## 快捷键与使用指南
+1. 屏幕上出现一个单词，先在心里想一想它的意思。
+2. 按空格键翻面，看中文释义和例句。
+3. 按数字键给自己打分：
 
-### 1. 全局快捷键
-
-| 快捷键 | 功能 | 说明 |
+| 按键 | 意思 | 什么时候按 |
 |:---|:---|:---|
-| `Ctrl + /` | 打开全局单词搜索 | 可以在任意界面唤起搜索，返回后自动关闭 |
-| `Ctrl + Z` / `Ctrl + Q` / `Ctrl + C` | 安全退出 | 双击 `Esc` 也可以安全退出，退出前会自动保存数据并释放连接 |
-| `Esc` | 返回上一级 / 取消锁定 | 用于从子页面退回主页面或取消编辑/锁定状态 |
-| `?` (或 `Shift + ?`) | 显示/隐藏底部快捷键栏 | 可以在大多数页面上切换底部帮助信息的可见性 |
+| 1 | 陌生 | 完全没想起来，很快会再让你复习 |
+| 2 | 熟悉 | 想了半天才想起来，或者只想起一部分 |
+| 3 | 记得 | 正常想起来了，大多数时候按这个 |
+| 4 | 掌握 | 一看就会，很久之后才会再出现 |
 
-### 快捷键(可使用?查看)
-**学习/复习页面**
+4. 打完分再按一次空格，确认并进入下一个词。打分后、按空格前，还可以换成别的分数。
+5. 想休息了按 Esc 回首页，已经背过的词都会保存。
 
-使用间隔重复记忆系统（FSRS）。
+也可以不翻面直接按 1 到 4，程序会翻面并记下这个分数，看完释义再按空格确认。
 
-| 快捷键 | 功能 | 说明 |
+## 每天怎么用
+
+首页有六个入口，按对应的数字键进入：
+
+| 按键 | 功能 |
+|:---|:---|
+| 1 | 学习：学新单词，有该复习的词时会穿插着出现（大约每 3 个复习词配 1 个新词） |
+| 2 | 复习：只过一遍该复习的词 |
+| 3 | 拼写：看中文释义，拼出单词 |
+| 4 | 词表：浏览和搜索词书里的所有单词 |
+| 5 | 日历：看每天的打卡情况 |
+| 6 | 设置：调整每天的数量、换词书 |
+
+建议每天按这个顺序来：先按 2 复习，再按 1 学新词，最后按 3 拼写。
+
+哪个词哪天该复习，程序会根据你的打分自动安排（使用 FSRS 记忆算法），不需要你自己记。有该复习的词时，首页会提示待复习的数量。这时按 1，程序会先提醒你建议先复习；如果就想学新词，再按一次 1。
+
+### 拼写
+
+![拼写](docs/assets/spelling.gif)
+
+屏幕上显示中文释义和音标，直接打出这个单词，按 Enter 判断对错，再按 Enter 进入下一题。想不起来时按 Tab，会帮你补出下一个字母。拼错的词会重新安排复习。
+
+### 查词
+
+![查词](docs/assets/search.gif)
+
+在任何页面按 Ctrl + / 都能打开查词，输入几个字母就会列出匹配的单词。用 ↑ ↓ 选择，按 Enter 锁定下方的详细释义，锁定后可以用 ↑ ↓ 翻看更长的内容。按 Ctrl + F 只看收藏过的单词。
+
+### 打卡日历
+
+![日历](docs/assets/calendar.png)
+
+绿色的日期表示那天学过。日历下方也可以修改每轮新词、每轮复习和每日拼写的数量：用 ↑ ↓ 选择，按空格修改，输入数字后按 Enter 保存。
+
+### 调整每天的数量
+
+按 6 进入设置。"每轮新词"默认是 20 个，"每日拼写"默认是 15 个。用 ↑ ↓ 选中要改的项，按 Enter，输入新的数字，再按 Enter 保存。
+
+![设置](docs/assets/settings.png)
+
+## 换成自己的单词书
+
+程序自带的 850 词是一个叫 words 的词书。你可以用 Excel 做一份自己的单词表，换着背。
+
+1. 用 Excel 新建一个表格，第一行写列名，从第二行开始每行一个单词。第一行要把下面 8 个列名都写上，顺序不限。w 列必须填单词，其他列没有内容可以空着，但列名不能省，少了列名程序会提示"词表字段缺失"。
+
+| 列名 | 填什么 | 例子 |
 |:---|:---|:---|
-| `Space` / `Enter` | 翻卡 / 确认评分 | 单词正面按此键可翻转展示背面释义与例句 |
-| `1` | 陌生 (Again) | 没记住，重新学 |
-| `2` | 熟悉 (Hard) | 勉强记住，下次复习间隔较短 |
-| `3` | 记得 (Good) | 顺利记住（推荐），复习间隔正常 |
-| `4` | 掌握 (Easy) | 牢固掌握，复习间隔较长 |
-| `s` | 跳过 (Skip) | 临时跳过当前词，不记录评分与进度 |
-| `t` | 挂起单词 (Suspend) | 永久停用该词。挂起后未来的任何背诵和拼写练习都不再调度该词 |
-| `f` | 收藏/取消收藏 (Star) | 切换收藏状态（卡片右上角将标记 `*`），便于后续单独过滤复习 |
-| `↑` / `↓` | 垂直滚动 | 释义或例句过长溢出面板时，按上下方向键平滑滚动查看全部内容 |
-| `Esc` | 返回 | 中途返回主页面，系统会自动保存当前已完成的背诵进度 |
+| w | 单词（必填） | come |
+| zh | 中文释义（建议填） | 来,前来 |
+| us | 音标 | /kʌm/ |
+| en | 英文释义 | move toward the speaker or a place |
+| c | 分类，比如词性 | op |
+| core | 一句话讲清这个词的核心意思 | 朝说话者或目标靠近，让彼此距离变短。 |
+| ex | 英文例句 | Come here when you're ready. |
+| exz | 例句的中文翻译 | 准备好了就过来。 |
 
-**词表浏览与搜索页面**
+2. 保存时选"另存为"，文件类型选"CSV UTF-8(逗号分隔)(*.csv)"。一定要选带 UTF-8 的这一项，选普通的"CSV(逗号分隔)"，程序读不了里面的中文，单词导入不进来。文件名就是词书的名字，比如"考研词汇.csv"。用 WPS 等其他软件时，也要选 UTF-8 编码的 CSV。
+3. 打开程序文件夹里的 termi_data 文件夹，再打开其中的 imports 文件夹，把文件放进去，和自带的 words.csv 放在一起。
+4. 在程序里按 6 进入设置，用 ↓ 移到最下面的"词书与映射管理"，按 Enter。
+5. 在列表里选中你的文件，按 Enter 启用。程序会自动读取里面的单词，回到首页就能开始背。
 
-展示当前词本的所有单词，支持关键字实时模糊搜索。
+可以参考自带词书的写法，下面是它的前几行。完整文件在 [termi_data/imports/words.csv](termi_data/imports/words.csv)，打开后点右上角的下载按钮就能保存下来，用 Excel 打开改成自己的单词。
 
-| 快捷键 | 功能 | 说明 |
-|:---|:---|:---|
-| `↑` / `↓` | 移动光标 | 在单词列表中上下移动选择单词 |
-| `f` / `Ctrl + F` | 切换仅看收藏 | 切换是否仅过滤已收藏的单词（输入框聚焦时必须使用 `Ctrl+F` 触发） |
-| `Enter` / `Space` | 锁定底部详情 | 将当前单词的详细释义卡片锁定。锁定后可按 `↑` `↓` 键滚动阅读超长内容。再次按该键或 `Esc` 解锁 |
-| `Backspace` | 删除搜索字符 | 更改搜索输入内容 |
-| `Esc` | 退出 | 退出搜索框焦点 / 退出详情锁定 / 返回主页面 |
-
-
----
-
-## 如何导入与管理词包 CSV
-
-你可以放入自定义词本。只需将 CSV 文件放到运行目录下的 `termi_data/imports/` 目录中，程序启动时会自动扫描识别。
-
-### 1. 推荐的 CSV 表头 (开箱即用)
-
-如果你的 CSV 文件表头（第一行）使用以下列名，TermiWord 会自动匹配：
-
-| 列名 | 说明 | 示例值 | 是否必须 |
-|:---|:---|:---|:---|
-| `w` | 单词 (Word) | come | 必须 |
-| `c` | 词性 / 分类 (Category) | op | 可选 |
-| `zh` | 中文释义 (Chinese) | 来,前来 | 推荐 (用于背诵时查看) |
-| `en` | 英文释义 (English) | move toward the speaker or a place | 可选 |
-| `us` | 音标 (Pronunciation) | /kʌm/ | 可选 |
-| `core` | 核心释义 (Core Meaning) | 朝说话者或目标靠近，让彼此距离变短。 | 可选 |
-| `ex` | 英文例句 (Example) | Come here when you're ready. | 可选 |
-| `exz` | 例句翻译 (Example Trans) | 准备好了就过来。 | 可选 |
-
-示例格式：
 ```csv
 w,c,zh,en,us,core,ex,exz
 come,op,"来,前来",move toward the speaker or a place,/kʌm/,朝说话者或目标靠近，让彼此距离变短。,Come here when you're ready.,准备好了就过来。
 get,op,"得到,获得;变得","obtain, become, or receive",/ɡɛt/,把东西收到手里，或让状态变成新的样子。,I'll get a new book tomorrow.,我明天会买本新书。
+give,op,"给,赠予",transfer something to another,/ɡɪv/,把自己这边的东西交到别人那边，让所有权换手。,Please give me your hand.,请把手伸给我。
+go,op,"去,离开",move away or proceed,/ɡoʊ/,离开当前位置，朝另一个地方移动过去。,We go to school every day.,我们每天都去学校。
 ```
 
-### 2. 自定义 CSV 列名映射
+### 表格的列名不是 w、zh 怎么办
 
-如果你的 CSV 词书列名与推荐的并不一致（例如使用 `Word` 代替 `w`，`Translate` 代替 `zh`）：
+最简单的办法是把表格第一行改成上面的 8 个列名。不想改表格的话，比如你的表格只有"单词""释义"两列，可以告诉程序哪一列是什么：
 
-1. 准备 CSV 文件：确保为UTF-8编码且第一行为表头，将其放入程序所在的目录的 `termi_data/imports/` 目录下（如 `my_words.csv`）。
-2. 在应用中绑定字段：
-   - 进入系统设置与词书管理界面。在 CSV 列表中选中 `my_words.csv` 并按回车设定为当前词书。
-   - 在下方的 “映射关系配置” 中，按 `Enter` 循环切换，将 `单词映射(w)` 绑定到 `Word` 列，`中文映射(zh)` 绑定到 `Translate` 列。
-   - 移动光标到最下方的 `[确认执行同步]` 按回车，再次按 `y` 确认。
+1. 在"词书与映射管理"页面先启用这本词书。这时会提示"同步失败！词表字段缺失"，是正常的，继续往下做。
+2. 用 ↓ 移到"单词映射(w)"，按 Enter，输入你表格里的列名，比如"单词"，再按 Enter。
+3. 用同样的方法把"中文映射(zh)"设成"释义"。
+4. 其余你表格里没有的项，比如"英文映射(en)""音标映射(us)"，也要逐个选中，按两次 Enter（打开后什么都不输入，直接确认），告诉程序这一列不用。只显示"(未绑定)"而没有这样确认过的项，同步时仍会提示字段缺失。
+5. 移到"同步当前词书"，按 Enter，看到"同步成功"就可以回首页开始背了。
 
-### 3. 将 JSON 词包转换为 CSV 格式
+### 修改词书里的内容
 
-如果你有 JSON 格式的外部词表，可以直接使用项目中简易的转换脚本 `scripts/convert_json.py`：
+发现释义写错了，或者想补充例句，直接用 Excel 改 imports 文件夹里的那个文件并保存，然后进入"词书与映射管理"，选"同步当前词书"按 Enter。已经背过的进度会保留。
+
+## 常见问题
+
+<details>
+<summary>Windows 上双击 termi-word.exe 没反应，或者一闪就关掉了</summary>
+
+先确认已经解压。直接在压缩包里双击是运行不了的，要先右键"全部解压缩"，再到解压出来的文件夹里双击。另外，termi-word.exe 不能单独拿出来用，需要和文件夹里的其他文件放在一起。
+
+</details>
+
+<details>
+<summary>Mac 上已经点了"仍要打开"，还是提示无法打开</summary>
+
+可以一次性解除整个文件夹的系统拦截。打开"终端"（在"启动台"里搜索"终端"），输入下面这行，把路径换成你解压出来的文件夹，按回车：
 
 ```bash
-# 执行转换（自动生成并保存至 termi_data/imports/my_words.csv）
-python scripts/convert_json.py path/to/my_words.json
+xattr -dr com.apple.quarantine ~/Downloads/termi_word_mac_arm64
 ```
 
-#### 支持的 4 种典型 JSON 输入格式参考：
+不知道路径的话，可以先输入 `xattr -dr com.apple.quarantine ` （末尾有一个空格），然后把文件夹拖进终端窗口，路径会自动填上，再按回车。
 
-**【格式 1】标准对象数组**
-```json
-[
-  {"w": "abandon", "zh": "vt. 放弃，遗弃", "us": "/əˈbændən/", "ex": "He abandoned his car."},
-  {"w": "ability", "zh": "n. 能力，才能", "us": "/əˈbɪləti/"}
-]
+</details>
+
+<details>
+<summary>界面显示不全，或者中文没有对齐</summary>
+
+把窗口拉大一些，程序会自动适应窗口大小。内容放不下时，可以用 ↑ ↓ 滚动查看。在 Windows 10 上如果中文对不齐，可以试试用"Windows 终端"打开（Windows 11 自带，Windows 10 可以在微软商店免费安装）。
+
+</details>
+
+<details>
+<summary>怎么退出</summary>
+
+在首页快速连按两次 Esc，或者按 Ctrl + Q。退出前会自动保存。
+
+</details>
+
+<details>
+<summary>学习记录存在哪里，怎么备份，换电脑怎么办</summary>
+
+都在程序文件夹里的 termi_data 文件夹中：termi_word.sqlite3 是你的学习记录和设置，imports 文件夹里是词书。备份或者换电脑时，把整个 termi_data 文件夹复制走就行。
+
+</details>
+
+<details>
+<summary>升级到新版本会丢失进度吗</summary>
+
+不会。把新版本解压到一个新文件夹，再把旧文件夹里的 termi_data 整个复制过来，覆盖新文件夹里的同名文件夹，然后用新文件夹里的程序打开。
+
+</details>
+
+<details>
+<summary>有些词已经会了，不想再背</summary>
+
+背单词时遇到这个词，按 t，再按 y 确认，这个词以后就不会再出现在背单词和拼写里。
+
+</details>
+
+<details>
+<summary>想把某些词收藏起来</summary>
+
+背单词时按 f 收藏，卡片顶部的进度后面会出现一个 * 号，再按一次取消。在查词页按 Ctrl + F 可以只看收藏的词。
+
+</details>
+
+## 按键速查
+
+在大多数页面按 ? 可以显示或隐藏底部的按键提示。
+
+在任何页面都能用：
+
+| 按键 | 作用 |
+|:---|:---|
+| Ctrl + / | 查词 |
+| Esc | 返回上一页；在首页快速按两次退出 |
+| Ctrl + Q、Ctrl + Z、Ctrl + C | 退出 |
+| ? | 显示或隐藏按键提示 |
+
+背单词和复习时：
+
+| 按键 | 作用 |
+|:---|:---|
+| 空格 / Enter | 翻面；翻面后确认分数并进入下一个词 |
+| 1 / 2 / 3 / 4 | 打分：陌生 / 熟悉 / 记得 / 掌握 |
+| s | 跳过这个词，不打分 |
+| t | 这个词以后不再出现（再按 y 确认，Esc 取消） |
+| f | 收藏或取消收藏 |
+| ↑ / ↓ | 释义太长时上下滚动 |
+| Esc | 回首页，已背的进度会保存 |
+
+拼写时：
+
+| 按键 | 作用 |
+|:---|:---|
+| 字母键 | 输入单词 |
+| Enter | 判断对错；判断后进入下一题 |
+| Tab | 提示下一个字母 |
+| ↑ / ↓ | 释义太长时上下滚动 |
+| Esc | 回首页 |
+
+查词时：
+
+| 按键 | 作用 |
+|:---|:---|
+| 字母键 | 输入要查的词，结果实时更新 |
+| ↑ / ↓ | 选择单词；锁定详情后用来滚动释义 |
+| Enter / 空格 | 锁定或解锁下方的详细释义 |
+| Ctrl + F | 只看收藏的词（输入框外也可以直接按 f） |
+| Esc | 解锁详情或离开输入框；再按一次回首页 |
+
+## 进阶用法
+
+下面的内容需要用到命令行，不影响日常使用，可以跳过。
+
+<details>
+<summary>在命令行输入 tw 直接启动</summary>
+
+下面以程序解压在 D:\termi_word_windows 为例，换成你自己的路径。
+
+Windows：打开 PowerShell（不需要管理员权限），依次执行下面两行。第一行在程序文件夹里建一个名叫 tw 的启动文件，第二行把程序文件夹加入系统的查找路径：
+
+```powershell
+Set-Content -Path "D:\termi_word_windows\tw.cmd" -Value '@"%~dp0termi-word.exe" %*' -Encoding ascii
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";D:\termi_word_windows", "User")
 ```
 
-**【格式 2】包含列表的包裹字典**
-```json
-{
-  "title": "CET-4 核心词汇",
-  "words": [
-    {"word": "abandon", "translation": "vt. 放弃", "phonetic": "/əˈbændən/"}
-  ]
-}
-```
+关掉 PowerShell 重新打开，输入 tw 就能启动。
 
-**【格式 3】单词-释义键值对**
-```json
-{
-  "abandon": "vt. 放弃，遗弃",
-  "ability": "n. 能力，才能"
-}
-```
-
-**【格式 4】JSONLines 逐行文件**
-```json
-{"w": "abandon", "zh": "vt. 放弃"}
-{"w": "ability", "zh": "n. 能力"}
-```
-
-*提示：若你的 JSON 键名比较特殊（如使用 `"headWord"` 或 `"tranCn"`），脚本会自动识别大部分常见命名。如需自定义，可随时在 [scripts/convert_json.py](termi_word/scripts/convert_json.py) 顶部的 `FIELD_MAP` 中增减候选键名。*
-
----
-
-### 4. 如何修改或更正已有词书
-
-如果你发现词书里的单词释义有误，或者想补充例句：
-
-1. 直接修改CSV：打开 `termi_data/imports/` 下的对应 `.csv` 文件，直接修改错别字或补全释义。
-2. 重新同步数据：打开程序进入设置界面，选中对应词书并点击 `[确认执行同步]`。系统会自动覆盖更新修改后的释义，同时保留你现有的背词进度和复习卡片。
-3. 挂起问题单词：背词过程中如果遇到不需要背的词，按 `t` 键并按 `y` 确认，即可挂起该单词，后续复习将自动忽略它。
-
----
-
-## 本地开发与运行
+Mac（默认使用 zsh）：
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-.venv\Scripts\activate     # Windows
-pip install -r requirements.txt
-
-# 运行 TUI 单词工具
-python -m termi_word
+echo "alias tw='$HOME/termi_word_mac_arm64/termi-word'" >> ~/.zshrc && source ~/.zshrc
 ```
 
----
+Linux（bash）：
 
-## 打包指南
-
-项目使用 Nuitka 的 `standalone` 模式进行构建。构建脚本会自动生成压缩包文件：
-
-- Windows: `output/termi_word_windows.zip`
-- Linux: `output/termi_word_linux.tar.gz`
-- macOS: `output/termi_word_mac.tar.gz`
-
-## 本地打包步骤
-
-安装依赖
 ```bash
-pip install nuitka
+echo "alias tw='$HOME/termi_word/termi-word'" >> ~/.bashrc && source ~/.bashrc
 ```
-执行构建：
-- Windows (PowerShell): `.\scripts\build.ps1`
-- Linux / macOS (Bash): `./scripts/build.sh`
 
-构建完成后，打包好的归档压缩文件直接保存在 `output/` 目录下。
+</details>
 
----
+<details>
+<summary>把 JSON 格式的词表转换成 CSV</summary>
 
-## 项目结构
+需要电脑上装有 Python 3，并下载本项目的 [scripts/convert_json.py](scripts/convert_json.py)。第二个参数是输出位置，指向程序文件夹里的 termi_data/imports，转换完就能在"词书与映射管理"里看到：
 
-```text
-termi_word/
-├── scripts/
-│   ├── build.ps1           # Windows 本地打包脚本
-│   └── build.sh            # Linux/macOS 本地打包脚本
-├── termi_word/
-│   ├── app.py              # TUI 应用入口
-│   ├── config.py           # 配置与路径映射
-│   ├── runtime_paths.py    # 运行时数据路径解析
-│   ├── database/           # 数据库与 ORM 模型
-│   ├── screens/            # TUI 页面视图
-│   └── services/           # 业务服务逻辑
-└── styles/
-    └── app.tcss            # TUI 界面样式
+```bash
+python convert_json.py my_words.json D:\termi_word_windows\termi_data\imports\my_words.csv
 ```
+
+不写第二个参数时，结果保存到当前目录下的 termi_data/imports/my_words.csv。
+
+支持这几种写法：对象数组（每个对象是一个词）、带 words 列表的对象、"单词: 释义"的键值对、每行一个 JSON 对象（JSON Lines）。常见的键名会自动识别，比如 word、headWord、translation、meaning、phonetic、example。需要识别其他键名时，在脚本顶部的 FIELD_MAP 里添加。
+
+</details>
+
+<details>
+<summary>从源码运行和打包</summary>
+
+见 [docs/development.md](docs/development.md)。
+
+</details>

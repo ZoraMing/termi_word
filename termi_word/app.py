@@ -177,6 +177,10 @@ class TermiWordApp(App):
 
         self.exit()
 
+    def action_help_quit(self) -> None:
+        """Ctrl+C 安全退出；有选中文字时由输入框和页面的复制绑定先处理，不会走到这里。"""
+        self.request_exit()
+
     def refresh_search_shortcut(self) -> None:
         """从数据库重新加载搜索快捷键配置（设置页修改后调用）。"""
         self.refresh_settings_cache()

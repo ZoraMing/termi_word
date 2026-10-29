@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import unicodedata
 
+from rich.markup import escape
 from rich.text import Text
 
 from termi_word.config import (
@@ -130,8 +131,19 @@ def wrap_lines(lines: list[str], width: int = PANEL_WIDTH, continuation_indent: 
 
 
 def footer_lines(text: str, width: int = PANEL_WIDTH, max_lines: int = 2) -> list[str]:
-    """将底部快捷键提示按终端显示宽度折行，避免窄窗口直接截断。"""
-    lines = wrap_display(text, width)
+    """将底部快捷键提示按终端显示宽度在空格处折行，避免窄窗口直接截断或把按键名拆到两行。"""
+    lines: list[str] = []
+    current = ""
+    for word in text.split(" "):
+        candidate = f"{current} {word}" if current else word
+        if current and display_width(candidate) > width:
+            lines.append(current.rstrip())
+            current = word
+        else:
+            current = candidate
+    lines.append(current)
+    # 单个词超过宽度时，再按字符折行
+    lines = [part for line in lines for part in wrap_display(line, width)]
     return lines[: max(1, max_lines)]
 
 
@@ -232,6 +244,18 @@ def text_panel(
 
 def rating_label(rating: int) -> str:
     return {1: "陌生", 2: "熟悉", 3: "记得", 4: "掌握"}.get(rating, "未评分")
+
+
+def format_us_display(us: str | None) -> str:
+    """音标统一显示为 /…/，词表里已带斜杠的不再重复添加。"""
+    if not us:
+        return ""
+    us_clean = us.strip()
+    if not us_clean:
+        return ""
+    if us_clean.startswith("/") and us_clean.endswith("/"):
+        return escape(us_clean)
+    return f"/{escape(us_clean)}/"
 
 
 from textual.app import ComposeResult

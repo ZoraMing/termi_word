@@ -8,19 +8,8 @@ from textual.widgets import Static
 from rich.markup import escape
 from termi_word.database.models import Card
 from termi_word.database.repositories import AppRepository
-from termi_word.ui import TermiScreen, wrap_display, make_tui_progress_bar, safe_register_worker, safe_unregister_worker
+from termi_word.ui import TermiScreen, format_us_display, wrap_display, make_tui_progress_bar, safe_register_worker, safe_unregister_worker
 from termi_word.ui.messages import format_study_action_result
-
-
-def _format_us_display(us: str | None) -> str:
-    if not us:
-        return ""
-    us_clean = us.strip()
-    if not us_clean:
-        return ""
-    if us_clean.startswith("/") and us_clean.endswith("/"):
-        return escape(us_clean)
-    return f"/{escape(us_clean)}/"
 
 
 class ReviewScreen(TermiScreen):
@@ -157,8 +146,8 @@ class ReviewScreen(TermiScreen):
         star_flag = " *" if word.is_starred else ""
         today_stats = f" | 待学: {today_new_left}新 {today_rev_left}复"
         
-        us_formatted = _format_us_display(word.us)
-        c_tag = f"\\[{escape(word.c)}\\]" if word.c else ""
+        us_formatted = format_us_display(word.us)
+        c_tag = f"\\[{escape(word.c)}]" if word.c else ""
 
         # 2. 区分正面与背面
         if not self.is_revealed:

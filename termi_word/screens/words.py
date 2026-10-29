@@ -16,6 +16,7 @@ from termi_word.database.models import Word
 from termi_word.database.repositories import AppRepository
 from termi_word.ui import (
     _pad_to_width,
+    format_us_display,
     is_footer_visible,
     render_content_block,
     render_footer,
@@ -249,7 +250,7 @@ class WordsScreen(Screen):
             status_pad = _pad_to_width(status_esc, 4)
             star_markup = "[#F59E0B]*[/]" if word.is_starred else " "
             
-            line_content = f"{pointer}{w_pad} {status_pad}{star_markup}{deck_tag_esc} \\[{c_esc}\\] {meaning_esc}"
+            line_content = f"{pointer}{w_pad} {status_pad}{star_markup}{deck_tag_esc} \\[{c_esc}] {meaning_esc}"
             if index == self.selected:
                 # 选中行背景高亮，文字高亮橙，底色深灰
                 lines.append(f"[#F59E0B on #1f2937]{line_content}[/]")
@@ -479,8 +480,8 @@ class WordsScreen(Screen):
     def _detail_lines(self, word: Word, width: int) -> list[str]:
         """返回全部详情行，支持自适应宽度折行与纵向滚动。"""
         lines = []
-        star_lbl = r" \[已收藏\]" if word.is_starred else ""
-        header_text = f"  {escape(word.w)}  /{escape(word.us or '-')}/{star_lbl}"
+        star_lbl = r" \[已收藏]" if word.is_starred else ""
+        header_text = f"  {escape(word.w)}  {format_us_display(word.us) or '/-/'}{star_lbl}"
         lines.extend(wrap_display(header_text, width=width, continuation_indent="  "))
         if word.core:
             lines.extend(wrap_display(f"  [#6B7280]Core:[/] {escape(word.core)}", width=width, continuation_indent="        "))

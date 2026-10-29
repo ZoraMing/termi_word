@@ -9,7 +9,7 @@ from textual.widgets import Input, Static
 
 from termi_word.database.models import Word
 from termi_word.database.repositories import AppRepository
-from termi_word.ui import TermiScreen, rule, make_tui_progress_bar, wrap_display, safe_register_worker, safe_unregister_worker
+from termi_word.ui import TermiScreen, format_us_display, rule, make_tui_progress_bar, wrap_display, safe_register_worker, safe_unregister_worker
 from termi_word.ui.messages import format_spelling_result
 
 
@@ -120,8 +120,9 @@ class SpellingScreen(TermiScreen):
         all_lines = []
         all_lines.extend(wrap_display(f"  [#6B7280]核心释义：[/]{word.core or '-'}", width=width, continuation_indent="            "))
         all_lines.extend(wrap_display(f"  [#6B7280]中文释义：[/]{word.zh or '-'}", width=width, continuation_indent="            "))
-        if word.us:
-            all_lines.extend(wrap_display(f"  [#6B7280]音标释义：[/]/{word.us}/", width=width, continuation_indent="            "))
+        us_formatted = format_us_display(word.us)
+        if us_formatted:
+            all_lines.extend(wrap_display(f"  [#6B7280]音标释义：[/]{us_formatted}", width=width, continuation_indent="            "))
         if self.show_answer:
             all_lines.extend(wrap_display(f"  [#F59E0B]正确答案：[/]{word.w}", width=width, continuation_indent="            "))
 
